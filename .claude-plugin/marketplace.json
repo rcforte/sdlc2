@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sdlc2-marketplace",
+  "description": "Single-plugin marketplace for sdlc2 — the feature graph.",
+  "owner": {
+    "name": "rcforte"
+  },
+  "plugins": [
+    {
+      "name": "sdlc2",
+      "description": "Graph of adversarial maker/checker loops: grilled idea → product framing → architecture ∥ UX → outside-in TDD slices, with rubric-scored gates and an arbiter that documents instead of stalling.",
+      "category": "development",
+      "source": "./"
+    }
+  ]
+}

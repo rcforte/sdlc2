@@ -1,0 +1,130 @@
+# /sdlc2 new-feature "<idea>" — run the feature graph
+
+Takes a **grilled** idea to **merge-ready slices**: product framing → architecture ∥ UX → build →
+report. Every node is a maker/checker loop; a node that can't reach its rubric threshold in 5
+rounds is **arbitrated and documented**, never stalled. The graph is autonomous end-to-end — the
+only human moments are the grilling that precedes it and the merge that follows it.
+
+**Contract:** when this returns, every slice that passed is committed on its own
+`slice/<feature>/<NN>-<slug>` branch, every slice that failed is marked for you, and every
+unresolved judgement call is a row in `VERIFY-WITH-HUMAN.md`. **sdlc2 never merges.**
+
+---
+
+## 1. Pre-checks — main thread, before invoking anything
+
+Do these in order and **stop** on the first failure, saying exactly what to fix.
+
+1. **Git.** The repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
+   the run (slices commit; stray changes would be swept into them). Resolve the default branch:
+   `git symbolic-ref --short refs/remotes/origin/HEAD` → else the current `main`/`master`.
+
+2. **Feature slug.** Kebab-case the idea (`"guest checkout"` → `guest-checkout`) unless the
+   argument already names an existing `.sdlc2/features/<slug>/`. All artifacts live under
+   `.sdlc2/features/<slug>/`.
+
+3. **The seed.** `.sdlc2/features/<slug>/feature.md` must exist and carry the shared understanding
+   from a grilling. **This is the one interactive step, and it belongs here, not inside the
+   graph** — subagents have no channel to the user, so a workflow can never interview.
+   If the seed is missing, conduct sdlc2's own grilling now, in this conversation:
+   read and follow `${CLAUDE_PLUGIN_ROOT}/skills/grill-with-docs/SKILL.md` (which drives
+   `${CLAUDE_PLUGIN_ROOT}/skills/grilling/SKILL.md` and
+   `${CLAUDE_PLUGIN_ROOT}/skills/domain-modeling/SKILL.md`). Then write the seed with these
+   sections — the `po` node is scored on covering every one of them:
+
+   ```markdown
+   # <Feature name>
+   ## Capability            what the user will be able to do, and why it matters
+   ## Agreed scope          what is in, decided during the grilling
+   ## Out of scope          what is deliberately excluded (name it; silence reads as an omission)
+   ## Decisions             each decision + the reasoning that settled it
+   ## Ubiquitous language   terms this feature introduces or sharpens
+   ## Open questions        anything the grilling could not settle
+   ```
+
+4. **Config.** Find the **nearest** `CLAUDE.md` from the repo root and read its
+   `<!-- sdlc2:config -->` block:
+
+   ```markdown
+   ## sdlc2
+   <!-- sdlc2:config -->
+   ```yaml
+   commands:
+     test:  "./mvnw -q test"      # MANDATORY — the tester's executable ground truth
+     build: ""                     # optional; omit what the stack lacks
+     run:   ""
+     e2e:   ""
+   seam:
+     backend:  "REST via MockMvc (@SpringBootTest)"
+     frontend: ""                  # empty until a frontend exists
+   ```
+   <!-- /sdlc2:config -->
+   ```
+
+   - **Missing block** → detect the stack (build files, test runner, existing test layout),
+     **propose** the block, show it, and **ask for confirmation before appending it** to
+     `CLAUDE.md`. Never write it silently: that file is the user's, and it is loaded into every
+     session. If there is no `CLAUDE.md`, offer to create one containing just this section.
+   - **`commands.test` empty or absent** → stop. Without it the `tester` has no oracle and the
+     whole build gate is theatre.
+   - **Malformed YAML** → stop and show the block; do not guess.
+   - A `CLAUDE.md` **nested** in a subdirectory overrides the root block for slices whose files
+     live under that directory. Record the map of `dir → config` and pass it along.
+
+5. **Baseline.** Run `commands.test` once. It must be **green** before the graph starts — a red
+   baseline makes every later tester verdict meaningless. If it's red, stop and say so.
+
+6. **Stamp `runId`** yourself: `nf-<UTC>` e.g. `nf-20260815T2130Z`. The workflow script is
+   sandboxed and cannot read the clock.
+
+7. **Resolve the agent prefix.** sdlc2 ships nine personas whose frontmatter names are
+   `sdlc2-product-owner`, `sdlc2-tester`, and so on. Depending on the host, plugin agents may be
+   registered under those bare names or namespaced as `sdlc2:sdlc2-product-owner`. Check which
+   form appears in your available agent types and pass `agentPrefix` accordingly — `""` for the
+   bare form, `"sdlc2:"` for the namespaced one. If neither resolves, **stop**: the plugin's
+   agents are not installed, and running the graph against globally-installed lookalikes would
+   violate sdlc2's independence.
+
+---
+
+## 2. Invoke the engine
+
+Check whether the **`Workflow` tool** is available to you.
+
+- **Available** → call it with:
+  - `scriptPath`: `${CLAUDE_PLUGIN_ROOT}/new-feature.workflow.js`
+  - `args`:
+    ```jsonc
+    {
+      "feature": "<slug>",
+      "title": "<the idea, verbatim>",
+      "featureDir": ".sdlc2/features/<slug>",
+      "pluginRoot": "<the resolved ${CLAUDE_PLUGIN_ROOT}>",
+      "runId": "nf-<UTC>",
+      "defaultBranch": "<resolved>",
+      "config": { "commands": { "test": "…", "…": "…" }, "seam": { "backend": "…", "frontend": "…" } },
+      "configByDir": { "frontend/": { "commands": { "test": "npm test" } } },
+      "agentPrefix": ""
+    }
+    ```
+    Pass `config` **inline** — the sandboxed script has no filesystem access, and every agent
+    prompt it builds needs the test command.
+- **Not available** → say so plainly and stop. The main-thread fallback engine is **deferred**
+  in v0.1; do not improvise one, and do not fall back to another harness.
+
+---
+
+## 3. After it returns
+
+Summarize from the result, in this order:
+
+1. **Node table** — `po · architect · ux · build`, each with verdict (`pass` / `soft-pass` /
+   `hard-fail`), score and rounds consumed. Say plainly if anything soft-passed; a run with a
+   soft-pass is **never** reported as clean.
+2. **Slices** — shipped (`branch @ sha`), escalated (+ the unresolved defects), skipped (+ why).
+3. **Human-verify** — the count and one-line summary of each new `VH-NN` row.
+4. **Next action** — review the `slice/<feature>/…` branches and
+   `.sdlc2/features/<slug>/VERIFY-WITH-HUMAN.md`, then merge yourself. State that sdlc2 has not
+   merged and will not.
+
+Point at the run report: `.sdlc2/features/<slug>/runs/<runId>.md`.
