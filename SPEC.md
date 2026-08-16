@@ -46,6 +46,17 @@ sdlc2 shares **nothing** at runtime with any other harness.
 - `[R-PKG-03]` **MUST**: the router reads only the dispatched mode file (progressive disclosure)
   and resolves every plugin path through `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded `~/.claude`.
 - `[R-PKG-04]` **MUST**: an unknown or missing subcommand prints the table and stops. Never guess.
+- `[R-PKG-05]` **MUST**: the bundled installers (`install.sh`, `install.ps1`) install **only**
+  through documented `claude plugin` subcommands. They **MUST NOT** run `git`, write any path
+  under the user's home directory, or modify a project's `CLAUDE.md`; and they **MUST NOT**
+  prompt, because the documented delivery pipes them into a shell, where the script itself is
+  standard input. They **MUST** assert the installed component inventory — the counts they check
+  are the counts this repo actually ships, so adding a persona fails verification until the
+  installers are updated. They **MUST NOT** assert a `Commands` count: `claude plugin details`
+  reports Skills, Agents, Hooks, MCP servers and LSP servers only, so the `/sdlc2` router is
+  confirmed by running `/sdlc2 help`. Being shipped files, they are scanned by the independence
+  checks like any other — `[R-IND-01]` is only worth having if it covers every extension the
+  bundle contains.
 
 ## 3. Configuration — the project's CLAUDE.md
 
@@ -226,6 +237,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-PKG-01/02 | `.claude-plugin/*.json`, `commands/sdlc2.md` | both parse as JSON, the plugin is named `sdlc2`, its version matches `VERSION`, the router exists | ✅ |
 | R-PKG-03 | `commands/sdlc2.md`, `modes/*.md` | `${CLAUDE_PLUGIN_ROOT}` present, `~/.claude` absent | ✅ |
 | R-PKG-04 | `commands/sdlc2.md` | read the router's rules | 👁 |
+| R-PKG-05 | `install.sh`, `install.ps1` | greps: only `claude plugin` for installation, no `git`, no home-dir path, no `CLAUDE.md` write, no prompt, no `Commands` assertion; the asserted agent/skill counts equal the shipped persona/skill counts; both documented in the README with a matching raw URL | ✅ |
 | R-CFG-01/03/05 | `modes/new-feature.md` §1.4 | read the mode's config step | 👁 |
 | R-CFG-02 | `assertArgs()` | the engine throws when `commands.test` is empty, and runs when it is not | ✅ |
 | R-CFG-04 | `configFor()`, `conventions()` | longest **path-segment** prefix wins; `frontend` does not claim `frontend-legacy/`; doc-node prompts list the overrides | ✅ |

@@ -22,18 +22,48 @@ came from.
 
 ## Install
 
+**macOS, and Windows under WSL**
+
 ```bash
-git clone <this repo> ~/dev/code/sdlc2      # or use it where it is
+curl -fsSL https://raw.githubusercontent.com/rcforte/sdlc2/main/install.sh | bash
 ```
 
-Then in Claude Code:
+**Windows, native PowerShell**
 
-```
-/plugin marketplace add ~/dev/code/sdlc2
-/plugin install sdlc2
+```powershell
+irm https://raw.githubusercontent.com/rcforte/sdlc2/main/install.ps1 | iex
 ```
 
-`git pull` + `/plugin update sdlc2` picks up changes.
+Either one installs from GitHub through Claude Code's own plugin CLI, then **checks that
+the host actually registered the nine personas and four skills** — the failure `SPEC.md`
+§12 risk 2 names as the likeliest one on a first run. Re-running is safe: it updates
+what is already there and re-checks, so it is also the repair path. Restart Claude Code
+afterwards.
+
+Prefer to do it by hand, or reading the script first? It is two commands:
+
+```bash
+claude plugin marketplace add rcforte/sdlc2
+claude plugin install sdlc2@sdlc2-marketplace --scope user
+```
+
+Or, inside Claude Code, `/plugin marketplace add rcforte/sdlc2` then `/plugin install sdlc2`.
+
+**Working on sdlc2 itself?** Point the marketplace at your clone instead, so your edits
+are the installed plugin: `claude plugin marketplace add ~/dev/code/sdlc2`.
+
+| | |
+|---|---|
+| Update | re-run the installer, or `claude plugin update sdlc2` |
+| Repair / diagnose | re-run the installer — it re-checks the inventory |
+| Uninstall | `claude plugin uninstall sdlc2@sdlc2-marketplace` then `claude plugin marketplace remove sdlc2-marketplace` |
+
+Use the qualified `sdlc2@sdlc2-marketplace` id throughout: `claude plugin details` accepts
+the bare `sdlc2`, but `claude plugin update` answers `Plugin "sdlc2" not found`.
+
+The installers touch nothing but the `claude plugin` CLI: no clone, no writes under your
+home directory, and never your project's `CLAUDE.md` — that file is proposed and
+confirmed by `/sdlc2 new-feature`, never written behind your back (`SPEC.md` §3).
 
 ## Use
 

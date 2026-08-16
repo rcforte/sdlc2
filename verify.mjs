@@ -47,7 +47,9 @@ const shipped = []
     if (e.name === '.git' || e.name === 'node_modules') continue
     const p = d ? `${d}/${e.name}` : e.name
     if (e.isDirectory()) walkDir(p)
-    else if (/\.(md|js|mjs|json)$/.test(e.name)) shipped.push(p)
+    // .sh/.ps1 are scanned too: they ship inside the bundle, and a shipped file the
+    // independence grep cannot see is exactly how the v0.1.0 review's H12/H13 survived.
+    else if (/\.(md|js|mjs|json|sh|ps1)$/.test(e.name)) shipped.push(p)
   }
 })('')
 const SELF = /verify\.mjs|SPEC\.md|REVIEW-[\d.]+\.md/
@@ -127,6 +129,52 @@ for (const f of agentFiles) {
 }
 check(strayNames.length === 0, `no persona names a skill sdlc2 does not bundle${strayNames.length ? ' — ' + strayNames.join(', ') : ''}  [R-IND-02]`)
 check(unrooted.length === 0, `bundled skills are referenced by \${CLAUDE_PLUGIN_ROOT} path${unrooted.length ? ' — ' + unrooted.join(' | ') : ''}  [R-IND-02]`)
+
+// ── 3b. installers ────────────────────────────────────────────────────────
+group('installers  [R-PKG-05]')
+const INSTALLERS = ['install.sh', 'install.ps1']
+const installers = {}
+for (const f of INSTALLERS) {
+  const present = existsSync(join(ROOT, f))
+  check(present, `${f} exists`)
+  if (present) installers[f] = R(f)
+}
+const readme = R('README.md')
+for (const [f, body] of Object.entries(installers)) {
+  // Installation goes through the documented CLI and nothing else. Anything that clones,
+  // writes under $HOME, or edits a project's CLAUDE.md is doing the host's job for it.
+  check(/claude plugin (marketplace add|install)/.test(body), `${f}: installs through the documented \`claude plugin\` CLI  [R-PKG-05]`)
+  check(!/(^|[;&|(`\s])git\s+(clone|pull|fetch|checkout|init|remote)\b/m.test(body), `${f}: never runs git — Claude Code fetches the plugin  [R-PKG-05]`)
+  check(!/~\/\.claude|\$HOME\/\.claude|USERPROFILE|\$env:HOME/.test(body), `${f}: writes no path under the user's home  [R-PKG-05]`)
+  check(!/(>>?|Set-Content|Add-Content|Out-File|tee)\s*[^\n]*CLAUDE\.md/i.test(body), `${f}: never writes a project's CLAUDE.md  [R-CFG-03]`)
+  // Piped into a shell, the script IS stdin — a prompt would read the rest of itself.
+  check(!/\bread\s+-[rp]|\bRead-Host\b|\bselect\b\s+\w+\s+in\b/.test(body), `${f}: never prompts — the documented delivery pipes it into a shell  [R-PKG-05]`)
+  check(body.includes(market ? market.name : 'sdlc2-marketplace'), `${f}: names the marketplace declared in marketplace.json  [R-PKG-01]`)
+  check(readme.includes(f), `${f}: documented in README.md`)
+  // `claude plugin update` rejects the bare name (`Plugin "sdlc2" not found`) while
+  // `details` accepts it. One qualified id everywhere; this is the regression guard.
+  check(/PLUGIN_ID|PluginId/.test(body), `${f}: uses one qualified plugin@marketplace id  [R-PKG-05]`)
+  check(!/plugin (update|install|details)\s+"?\$\{?(PLUGIN|Plugin)\}?"?(\s|$)/m.test(body), `${f}: never passes the bare plugin name to the CLI  [R-PKG-05]`)
+}
+// The asserted counts ARE the shipped counts, so a tenth persona fails here rather than
+// shipping an installer that green-lights a half-registered plugin.
+for (const [f, body] of Object.entries(installers)) {
+  const a = body.match(/Expect_?Agents\s*=\s*(\d+)/i)
+  const s = body.match(/Expect_?Skills\s*=\s*(\d+)/i)
+  // `claude plugin details` counts slash COMMANDS under Skills — claude-md-management
+  // ships 1 skill + 1 command and reports Skills (2) — so the expected total is the
+  // bundled skills plus the /sdlc2 router.
+  const commandCount = readdirSync(join(ROOT, 'commands')).filter((n) => n.endsWith('.md')).length
+  check(a && Number(a[1]) === agentFiles.length, `${f}: asserts ${agentFiles.length} agents, the number this repo ships  [R-PKG-05]`)
+  check(s && Number(s[1]) === BUNDLED.length + commandCount, `${f}: asserts ${BUNDLED.length + commandCount} skills — ${BUNDLED.length} bundled plus ${commandCount} command, which the CLI counts under Skills  [R-PKG-05]`)
+}
+// There is no Commands category in the inventory, so an installer that asserted one
+// would fail on a correct install. This exact mistake was caught by running the script.
+for (const [f, body] of Object.entries(installers)) {
+  check(!/Expect_?Commands/i.test(body), `${f}: asserts no Commands count — the CLI inventory has no such category`)
+}
+check(/raw\.githubusercontent\.com\/rcforte\/sdlc2\/[^/\s]+\/install\.sh/.test(readme), 'README one-liner points at this repo\'s install.sh')
+check(/raw\.githubusercontent\.com\/rcforte\/sdlc2\/[^/\s]+\/install\.ps1/.test(readme), 'README one-liner points at this repo\'s install.ps1')
 
 // ── 4. the engine, structurally ───────────────────────────────────────────
 group('engine — structure')
