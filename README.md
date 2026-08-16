@@ -73,6 +73,11 @@ confirmed by `/sdlc2 new-feature`, never written behind your back (`SPEC.md` §3
 /sdlc2 help
 ```
 
+> **Setting up a project?** `SETUP.md` is the full contract: what your repo must have before the
+> graph will run, every config field and what actually reads it, a worked TypeScript + Spring Boot
+> + Maven example, and a walkthrough of the first slice. **sdlc2 builds features into an existing
+> project — it cannot create one**, because it refuses to start until your test command is green.
+
 **First run in a repo** does two things interactively before anything autonomous starts:
 
 1. **Grills you** (if there's no seed yet) and writes the shared understanding to
@@ -131,6 +136,7 @@ to check them.
 | `new-feature.workflow.js` | the graph: node table, rubrics, loop engine, build node, executor |
 | `agents/sdlc2-*.md` | the nine personas, with sdlc2's output contracts |
 | `skills/` | grill-with-docs · grilling · domain-modeling · outside-in-tdd |
+| `SETUP.md` | what a project must provide, the config-block reference, and the first slice |
 | `SPEC.md` | the contract: numbered rules + rubrics + conformance matrix + deferred + risks |
 | `REVIEW-0.1.0.md` | the review of v0.1.0 and the fixes it produced |
 | `verify.mjs` | `node verify.mjs` — conformance check. Structure (manifests, node table, rubric weights, prompt hygiene, independence) **and** behaviour: it evaluates the engine with stubbed agents and drives the loop, the build node and the graph walk through their failure paths. Proves shape and failure handling — not that the graph produces good software. |

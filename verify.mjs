@@ -176,6 +176,25 @@ for (const [f, body] of Object.entries(installers)) {
 check(/raw\.githubusercontent\.com\/rcforte\/sdlc2\/[^/\s]+\/install\.sh/.test(readme), 'README one-liner points at this repo\'s install.sh')
 check(/raw\.githubusercontent\.com\/rcforte\/sdlc2\/[^/\s]+\/install\.ps1/.test(readme), 'README one-liner points at this repo\'s install.ps1')
 
+// ── 3c. setup documentation ───────────────────────────────────────────────
+// A project cannot adopt sdlc2 without knowing what to put in its CLAUDE.md. These checks keep
+// that document from drifting away from the fields the engine actually renders.
+group('setup docs')
+check(existsSync(join(ROOT, 'SETUP.md')), 'SETUP.md exists')
+if (existsSync(join(ROOT, 'SETUP.md'))) {
+  const setup = R('SETUP.md')
+  check(readme.includes('SETUP.md'), 'README points at SETUP.md')
+  check(setup.includes('<!-- sdlc2:config -->') && setup.includes('<!-- /sdlc2:config -->'), 'SETUP.md shows the real config delimiters  [R-CFG-01]')
+  check(/commands\.test[^\n]*\bMANDATORY\b|\| `commands\.test` \| \*\*Yes\*\*/.test(setup), 'SETUP.md marks commands.test mandatory  [R-CFG-02]')
+  // Every field the prompts render must be documented, and nothing invented.
+  const engineSrc = R('new-feature.workflow.js') // `src` is not read until the engine section below
+  const rendered = ['test', 'build', 'run', 'e2e'].filter((k) => new RegExp(`c\\.${k}\\b`).test(engineSrc))
+  for (const k of rendered) check(setup.includes(`commands.${k}`), `SETUP.md documents commands.${k}, which conventions() renders`)
+  for (const k of ['backend', 'frontend']) check(setup.includes(`seam.${k}`), `SETUP.md documents seam.${k}`)
+  check(/cannot create|does not create/i.test(setup), 'SETUP.md states that sdlc2 cannot create a project')
+  check(/Known limitations/.test(setup), 'SETUP.md carries a known-limitations section')
+}
+
 // ── 4. the engine, structurally ───────────────────────────────────────────
 group('engine — structure')
 const src = R('new-feature.workflow.js')

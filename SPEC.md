@@ -298,7 +298,15 @@ It cannot prove the graph produces good software — the first real run is that 
    resolution and an agent misreading a prompt contract — not the graph logic.
 2. **Plugin agent namespacing** is host-dependent; `agentPrefix` exists so the mode can adapt
    without a code change. If neither form resolves, the mode stops rather than silently using a
-   global lookalike.
+   global lookalike. **Measured, 2026-08-16:** installing the plugin does *not* register its
+   agents in an already-running session — neither `sdlc2-product-owner` nor
+   `sdlc2:sdlc2-product-owner` resolved until Claude Code restarted. On that same machine the
+   host offered `architect`, `architect-critic`, `code-reviewer`, `developer`, `product-owner`,
+   `product-owner-critic`, `tester`, `ux-auditor` and `ux-design` — a global lookalike for
+   **every one** of the nine personas. Dropping the `sdlc2-` prefix to make resolution "work"
+   would produce a complete, plausible, entirely non-sdlc2 run. Two mitigations hold: pre-check 7
+   stops rather than guesses, and `agent()` *throws* on an unknown type, so `[R-LOOP-08]` turns
+   it into a critical defect rather than a silent pass.
 3. **No executable oracle above `build`.** `po`, `architect` and `ux` are LLM judging LLM. MIN +
    severity veto + fresh context reduce rubber-stamping; they do not eliminate it.
 4. **Cost.** Worst case ≈ (5 maker + 5 checker) × 3 doc nodes + (5 dev + 5 tester + 5 reviewer) ×
