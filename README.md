@@ -13,8 +13,12 @@ against a weighted rubric. Five rounds, then an **arbiter** decides, writes down
 and why, and the graph keeps going — it documents instead of stalling. One thing is never
 arbitrable: a **red test suite**. No arbiter, no score, no deadline commits over it.
 
-**Status: v0.1.0 — implemented, never executed.** Structurally verified; the first real run is the
-acceptance test. See `SPEC.md` §12 for what that means.
+**Status: v0.1.1 — implemented, never executed.** Verified in two ways: structurally (manifests,
+node table, rubric weights, prompt hygiene, independence) and *behaviourally* — `verify.mjs` runs
+the real engine against stubbed agents and drives it through its failure paths, so a dead checker,
+a vanished developer and a crashed node are proven not to produce a green run. The first real run
+is still the acceptance test. See `SPEC.md` §12, and `REVIEW-0.1.0.md` for the review those fixes
+came from.
 
 ## Install
 
@@ -46,7 +50,7 @@ Then in Claude Code:
    channel to you — so this is the one conversational step, and it happens up front.
 2. **Proposes a config block** for the project's own `CLAUDE.md` and asks before writing it:
 
-   ```markdown
+   ~~~markdown
    ## sdlc2
    <!-- sdlc2:config -->
    ```yaml
@@ -56,7 +60,7 @@ Then in Claude Code:
      backend: "REST via MockMvc (@SpringBootTest)"
    ```
    <!-- /sdlc2:config -->
-   ```
+   ~~~
 
    That block is the **only** config sdlc2 has. A nested `CLAUDE.md` in a subdirectory overrides it
    for slices under that directory — per-area commands in a monorepo, for free.
@@ -94,8 +98,9 @@ to check them.
 | `commands/sdlc2.md` | the `/sdlc2 <subcommand>` router |
 | `modes/new-feature.md` | pre-checks, engine invocation, how to report the result |
 | `modes/status.md` | read-only status |
-| `new-feature.workflow.js` | the graph: node table, rubrics, loop engine, build node |
+| `new-feature.workflow.js` | the graph: node table, rubrics, loop engine, build node, executor |
 | `agents/sdlc2-*.md` | the nine personas, with sdlc2's output contracts |
 | `skills/` | grill-with-docs · grilling · domain-modeling · outside-in-tdd |
-| `SPEC.md` | the contract: numbered rules + conformance matrix + deferred + risks |
-| `verify.mjs` | `node verify.mjs` — structural conformance check (manifests, node table, rubric weights, pure helpers, prompt hygiene, independence). Proves shape, not behaviour. |
+| `SPEC.md` | the contract: numbered rules + rubrics + conformance matrix + deferred + risks |
+| `REVIEW-0.1.0.md` | the review of v0.1.0 and the fixes it produced |
+| `verify.mjs` | `node verify.mjs` — conformance check. Structure (manifests, node table, rubric weights, prompt hygiene, independence) **and** behaviour: it evaluates the engine with stubbed agents and drives the loop, the build node and the graph walk through their failure paths. Proves shape and failure handling — not that the graph produces good software. |

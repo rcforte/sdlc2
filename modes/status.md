@@ -12,14 +12,21 @@ Report, in this order:
 2. **Features** — for each `.sdlc2/features/<slug>/`:
    - which artifacts exist (`feature.md` · `mockup.html` · `design.md` · `issues/` · how many),
    - the newest run's node table if `runs/*.md` exists (node · verdict · score · rounds),
-   - whether any node **soft-passed** — call it out, it is the thing most easily missed.
+   - whether any node **soft-passed**, **hard-failed** or was **skipped** — call these out; a
+     soft-pass is the thing most easily missed, and a skipped node means part of the graph never
+     ran at all. Distinguish a node skipped by its *gate* (`ux` on a feature with no UI — normal)
+     from one skipped because an upstream node failed or the budget ran out (not normal).
 
 3. **Human-verify** — open rows across every feature's `VERIFY-WITH-HUMAN.md`: id, node,
    severity, the one-line decision. These are judgement calls the arbiter made on your behalf and
    nobody has confirmed.
 
 4. **Slices** — `git branch --list 'slice/*'`, each with ahead-count vs the default branch and
-   whether it is merged. Unmerged slice branches are the work waiting on your review.
+   whether it is merged. Unmerged slice branches are the work waiting on your review. An
+   **escalated** slice in the run report has a reason worth repeating verbatim: `no-commit` means
+   there is no branch to review at all, `tester-red` means there is a branch whose suite is red,
+   `tester-silent` means the branch exists but was never verified, and `unjudgeable` means a
+   checker could not evaluate it.
 
 5. **Readiness** — is the working tree clean, is `commands.test` green (say when it was last
    observed green, don't re-run it here), and is the `Workflow` tool available to you (fast path)

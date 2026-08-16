@@ -17,7 +17,16 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
 
 1. **Git.** The repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
    the run (slices commit; stray changes would be swept into them). Resolve the default branch:
-   `git symbolic-ref --short refs/remotes/origin/HEAD` → else the current `main`/`master`.
+
+   ```bash
+   git symbolic-ref --short refs/remotes/origin/HEAD | sed 's|^origin/||'   # → main
+   ```
+
+   **Strip the remote prefix.** That command prints `origin/main`, and the engine passes
+   `defaultBranch` straight into the developer's git instructions — a slice cut from
+   `origin/main` with "`origin/main` must not move" reads as nonsense and risks a detached HEAD.
+   If there is no `origin/HEAD`, use the current branch when it is `main` or `master`, and
+   otherwise **ask** rather than guess: every slice branch is cut from this.
 
 2. **Feature slug.** Kebab-case the idea (`"guest checkout"` → `guest-checkout`) unless the
    argument already names an existing `.sdlc2/features/<slug>/`. All artifacts live under
@@ -45,7 +54,7 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
 4. **Config.** Find the **nearest** `CLAUDE.md` from the repo root and read its
    `<!-- sdlc2:config -->` block:
 
-   ```markdown
+   ~~~markdown
    ## sdlc2
    <!-- sdlc2:config -->
    ```yaml
@@ -59,14 +68,15 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
      frontend: ""                  # empty until a frontend exists
    ```
    <!-- /sdlc2:config -->
-   ```
+   ~~~
 
    - **Missing block** → detect the stack (build files, test runner, existing test layout),
      **propose** the block, show it, and **ask for confirmation before appending it** to
      `CLAUDE.md`. Never write it silently: that file is the user's, and it is loaded into every
      session. If there is no `CLAUDE.md`, offer to create one containing just this section.
    - **`commands.test` empty or absent** → stop. Without it the `tester` has no oracle and the
-     whole build gate is theatre.
+     whole build gate is theatre. The engine refuses on the same condition, so a run that
+     somehow gets past you fails immediately rather than half-way through.
    - **Malformed YAML** → stop and show the block; do not guess.
    - A `CLAUDE.md` **nested** in a subdirectory overrides the root block for slices whose files
      live under that directory. Record the map of `dir → config` and pass it along.
@@ -116,15 +126,24 @@ Check whether the **`Workflow` tool** is available to you.
 
 ## 3. After it returns
 
-Summarize from the result, in this order:
+The result's `nodes` array already carries one row per node; report it as it stands, in this
+order:
 
-1. **Node table** — `po · architect · ux · build`, each with verdict (`pass` / `soft-pass` /
-   `hard-fail`), score and rounds consumed. Say plainly if anything soft-passed; a run with a
-   soft-pass is **never** reported as clean.
-2. **Slices** — shipped (`branch @ sha`), escalated (+ the unresolved defects), skipped (+ why).
+1. **Node table** — `po · architect · ux · build`, each with verdict, score and rounds consumed.
+   The verdicts are `pass` · `soft-pass` (an arbiter decided) · `partial` (build only: some slices
+   shipped, some did not) · `hard-fail` · `skipped` (with the reason — a gate that did not fire, a
+   dead upstream, or budget) · `not-run`. Say plainly if anything soft-passed; a run with a
+   soft-pass is **never** reported as clean, and neither is one with a skipped or hard-failed node.
+2. **Slices** — shipped (`branch @ sha`), escalated (+ the reason and the unresolved defects),
+   skipped (+ why). The escalation reasons are distinct and mean different things: `no-commit`
+   (the developer never reached a green commit — there is no branch to review), `tester-red` (it
+   committed but the suite never went green), `tester-silent` (the tester never answered — the
+   slice is *unverified*, not proven broken) and `unjudgeable` (a checker could not judge it).
 3. **Human-verify** — the count and one-line summary of each new `VH-NN` row.
 4. **Next action** — review the `slice/<feature>/…` branches and
    `.sdlc2/features/<slug>/VERIFY-WITH-HUMAN.md`, then merge yourself. State that sdlc2 has not
    merged and will not.
 
-Point at the run report: `.sdlc2/features/<slug>/runs/<runId>.md`.
+Point at the run report: `.sdlc2/features/<slug>/runs/<runId>.md`. It is written on **every**
+outcome, including a graph that aborted — if it is missing, the workflow itself failed to start
+(bad args or a missing test command), and the error text says which.

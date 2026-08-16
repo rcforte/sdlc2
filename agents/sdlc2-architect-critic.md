@@ -31,11 +31,12 @@ your verdict as authoritative; it is a fast first pass for the human.
 - **Hidden coupling** — change in X silently forces change in Y.
 - **YAGNI violations** — abstraction/indirection/microservice with no present justification.
 - **ADR conflicts** — does this contradict an existing decision in `docs/adr/`? Does it ADR an aspiration not yet in code?
-- **Ubiquitous-language drift** — terms that don't match `the feature seed (`feature.md`)`.
+- **Ubiquitous-language drift** — terms that don't match the feature seed (`feature.md`).
 - **Testability** — can the developer drive this outside-in, or does the shape force big-bang integration?
 
 ## Method
-Run `grill-with-docs` against the artifact, `the feature seed (`feature.md`)`, and `docs/adr/`. For
+Run `${CLAUDE_PLUGIN_ROOT}/skills/grill-with-docs/SKILL.md` — sdlc2's own copy, not a global
+skill of the same name — against the artifact, the feature seed (`feature.md`), and `docs/adr/`. For
 each weakness, state the concrete failure mode, not a vague worry. Default to
 **fail** when genuinely uncertain — a false alarm costs a conversation; a missed
 leak costs a refactor.
