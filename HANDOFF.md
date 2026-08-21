@@ -10,7 +10,11 @@ the graph builds in whatever repo the *session* is rooted in (pre-check 1, `SPEC
 
 The lab is ready: `main` carries run 1's four slices, its artifacts and the 14 resolved VH
 records; the suite is green (31 tests, 4 files); the tree is clean and the `slice/*` branches are
-deleted. `agentPrefix: "sdlc2:"`.
+deleted. `agentPrefix: "sdlc2:"` — re-probe it, discriminatingly, before spending anything.
+
+The harness is ready too: v0.1.2 is pushed and installed (see Repo states). This run exercises
+fixes that have themselves never executed, which is the same trap as run 1 — expect the second
+round of "an agent quietly did not do what the prompt said", and look for it deliberately.
 
 Run a **2–3 slice feature with a real `Blocked by:` chain** — that is what exercises the branch
 stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, in this order:
@@ -115,14 +119,16 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
 
 ## Repo states
 
-- **`~/dev/code/sdlc2`** — plugin. `main` at `40cc056` + **uncommitted** v0.1.2 work: the engine
-  (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`), both skill
-  rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14), `VERSION` and
-  `plugin.json` at `0.1.2`. `node verify.mjs` passes **220 checks**.
-- **Installed vs local.** v0.1.1 is what is installed, from the GitHub marketplace clone at
-  `b96f61c`. **The lab run will use v0.1.1 until v0.1.2 is pushed and updated** — none of the
-  fixes above are live yet. Push, then `claude plugin update sdlc2@sdlc2-marketplace`, then
-  restart, and re-probe resolution before spending the run.
+- **`~/dev/code/sdlc2`** — plugin. `main` at `1e7424b`, clean, **pushed**. v0.1.2 =
+  the engine (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`),
+  both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
+  `node verify.mjs` passes **220 checks**.
+- **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
+  0.1.1 to 0.1.2 on 2026-08-21, and the cache at
+  `~/.claude/plugins/cache/sdlc2-marketplace/sdlc2/0.1.2` is byte-identical to this repo for
+  `new-feature.workflow.js`, `modes/`, `skills/` and `VERSION`. Claude Code was restarted to apply
+  it. **Re-probe agent resolution before spending the run** — a restart is exactly when it broke
+  last time.
 - **`~/dev/code/sdlc2-lab`** — lab. `main` at `4169a34`, clean, 6 commits, suite green (31 tests,
   4 files, ~1.9s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
   to `main` and can be deleted whenever.
