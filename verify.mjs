@@ -130,6 +130,45 @@ for (const f of agentFiles) {
 check(strayNames.length === 0, `no persona names a skill sdlc2 does not bundle${strayNames.length ? ' — ' + strayNames.join(', ') : ''}  [R-IND-02]`)
 check(unrooted.length === 0, `bundled skills are referenced by \${CLAUDE_PLUGIN_ROOT} path${unrooted.length ? ' — ' + unrooted.join(' | ') : ''}  [R-IND-02]`)
 
+// Same hole, one level down. The walk above covers agents/ only — which is how
+// skills/grill-with-docs/SKILL.md ("Run a `/grilling` session, using the `/domain-modeling`
+// skill") stayed green through 205 checks while sending three personas to the HOST's skills on
+// their FIRST step, and skills/outside-in-tdd/SKILL.md kept pointing the developer at `/tdd` and
+// `/improve-codebase-architecture`. A slash-prefixed name in a skill body resolves against
+// whatever the host installed; a bundled skill must be named by its plugin-root path.  [R-IND-02]
+const skillDocs = []
+for (const s of BUNDLED) {
+  for (const f of readdirSync(join(ROOT, `skills/${s}`)).filter((n) => n.endsWith('.md'))) skillDocs.push([s, `skills/${s}/${f}`])
+}
+check(skillDocs.length >= BUNDLED.length, `every bundled skill ships at least one .md (${skillDocs.length} across ${BUNDLED.length} skills)`)
+const slashRefs = []
+const skillStray = []
+const skillUnrooted = []
+for (const [own, rel] of skillDocs) {
+  const body = R(rel)
+  // Preceded by start-of-line, whitespace, backtick or "(" — so `skills/outside-in-tdd/SKILL.md`
+  // and `${CLAUDE_PLUGIN_ROOT}/skills/...` are paths, not command invocations.
+  for (const m of body.match(/(?:^|[\s`(])\/[a-z][a-z0-9-]*/gm) || []) slashRefs.push(`${rel}: ${m.trim()}`)
+  for (const t of body.match(/`[^`\n]+`/g) || []) {
+    const name = t.slice(1, -1)
+    if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(name)) continue
+    if (TECHNICAL_TERMS.has(name) || name === own) continue
+    skillStray.push(`${rel}:${name}`)
+  }
+  for (const s of BUNDLED) {
+    if (s === own) continue // a skill may name itself in its own frontmatter
+    const re = new RegExp(`(?<!/)\\b${s}\\b`, 'g')
+    for (const line of body.split('\n')) {
+      if (re.test(line) && !line.includes('${CLAUDE_PLUGIN_ROOT}/skills/') && !/sdlc2's own|not any similarly named|own copy/i.test(line)) {
+        skillUnrooted.push(`${rel}: ${line.trim().slice(0, 60)}`)
+      }
+    }
+  }
+}
+check(slashRefs.length === 0, `no bundled skill invokes a slash command — those resolve against the host${slashRefs.length ? ' — ' + slashRefs.join(', ') : ''}  [R-IND-02]`)
+check(skillStray.length === 0, `no bundled skill names a skill sdlc2 does not bundle${skillStray.length ? ' — ' + skillStray.join(', ') : ''}  [R-IND-02]`)
+check(skillUnrooted.length === 0, `bundled skills cite each other by \${CLAUDE_PLUGIN_ROOT} path${skillUnrooted.length ? ' — ' + skillUnrooted.join(' | ') : ''}  [R-IND-02]`)
+
 // ── 3b. installers ────────────────────────────────────────────────────────
 group('installers  [R-PKG-05]')
 const INSTALLERS = ['install.sh', 'install.ps1']
@@ -216,6 +255,7 @@ const EXPORTS = [
   'weightedTotal', 'configFor', 'normalizeDir', 'cleanDefects', 'dedupe', 'defectKey',
   'blockingOpen', 'auditMaker', 'makerPrompt', 'checkerPrompt', 'arbiterPrompt',
   'escalationPrompt', 'rubricTable', 'conventions', 'runLoop', 'arbitrate', 'buildSlices', 'walk',
+  'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt',
   'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs',
 ]
 const ARGS = {
@@ -352,7 +392,10 @@ check(/Math\.min\.apply/.test(src) && !/scored\.reduce/.test(src), 'step score i
 check(/for \(const slice of slices\)/.test(src), 'build node iterates slices sequentially  [R-BUILD-04]')
 check(!/parallel\(\s*slices/.test(src), 'build node never parallelizes slices  [R-BUILD-04]')
 check(/agentPrefix/.test(src) && /function at\(/.test(src), 'agent types are resolved through a host-configurable prefix')
-check(!/\bmerge\b[^\n]*\$\{BASE\}|git merge/.test(src), 'the engine never merges  [R-BUILD-06]')
+// `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the
+// engine said, which is the opposite of merging. Exclude it by name rather than loosening the grep.
+check(!/\bmerge\b[^\n]*\$\{BASE\}|git merge(?!-base)/.test(src), 'the engine never merges  [R-BUILD-06]')
+check(/git merge-base --is-ancestor/.test(src), 'the tester proves the slice branch base with real git plumbing  [R-BUILD-04]')
 
 // ── 6. the engine, behaviourally ──────────────────────────────────────────
 // Every probe drives a REAL engine instance; only the agents are stubbed.
@@ -610,6 +653,46 @@ await probe('no test command', async () => {
   check(ranClean, 'and runs when the oracle is declared')
 })
 
+// P14 — a blocked slice is cut from its BLOCKER's branch, an independent one from the default
+// branch, and the tester is handed the assertions that prove it. This is the defect run 1
+// produced: the developer stacked four independent slices and the reviewer scored three earlier
+// slices' code as if it were this slice's work. [R-BUILD-04 / R-BUILD-04a]
+await probe('slice branch bases', async () => {
+  const said = []
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      const L = o.label || ''
+      said.push({ label: L, prompt: p })
+      if (L.startsWith('slices:resolve')) return { slices: [
+        { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] },
+        { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] },
+        { id: '03-c', path: 'issues/03-c.md', title: 'C', dir: '', blockedBy: [] },
+      ] }
+      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
+      if (L.startsWith('test:')) return { pass: true, defects: [] }
+      if (L.startsWith('review:')) return scoreAll(E.RUBRICS.build, 1)
+      return {}
+    },
+  })
+  const r = await E.buildSlices(E.NODES.build)
+  const of = (pre, id) => (said.find((s) => s.label.startsWith(`${pre}:${id}`)) || {}).prompt || ''
+
+  check(r.slices.shipped.length === 3, `all three slices ship in this probe (got ${r.slices.shipped.length})`)
+  check(/off 'main'/.test(of('build', '01-a')), 'an independent slice is cut from the default branch  [R-BUILD-04]')
+  check(/off 'slice\/demo\/01-a'/.test(of('build', '02-b')), 'a blocked slice is cut from its BLOCKER, not from the default branch  [R-BUILD-04]')
+  check(/off 'main'/.test(of('build', '03-c')), 'a later INDEPENDENT slice goes back to the default branch — it does not inherit the stack  [R-BUILD-04]')
+  check(/git diff slice\/demo\/01-a\.\.\./.test(of('review', '02-b')), "the reviewer diffs a stacked slice against its blocker, so the blocker's code is not replayed as this slice's work  [R-BUILD-04]")
+  check(/git diff main\.\.\./.test(of('review', '03-c')), 'and an independent slice is still diffed against the default branch  [R-BUILD-04]')
+  check(/merge-base --is-ancestor main HEAD/.test(of('test', '01-a')), 'the tester is told to PROVE the base with real git plumbing  [R-BUILD-04a]')
+  const t3 = of('test', '03-c')
+  check(/MUST NOT be an ancestor/.test(t3) && /slice\/demo\/01-a/.test(t3) && /slice\/demo\/02-b/.test(t3),
+    'and to prove the independent slice carries NEITHER of the branches before it  [R-BUILD-04a]')
+  check(!/MUST NOT be an ancestor[\s\S]*slice\/demo\/01-a/.test(of('test', '02-b')), "a blocker is never in its dependent's must-not-contain list  [R-BUILD-04a]")
+  const row = r.slices.rows.find((x) => x.id === '02-b')
+  check(row && row.base === 'slice/demo/01-a', 'the report row records what each slice was cut from  [R-REP-02]')
+})
+
 console.log('')
 if (fails) { console.log(`\x1b[31mFAILED\x1b[0m — ${fails} check(s)\n`); process.exit(1) }
-console.log('\x1b[32mAll checks passed.\x1b[0m Structure AND the failure paths — but still not proof the graph\nproduces good software: the first real run is that acceptance test.\n')
+console.log('\x1b[32mAll checks passed.\x1b[0m Structure AND the failure paths — but still not proof the graph\nproduces good software. Run 1 passed every check here and STILL stacked four branches it was\ntold to keep separate; only running it again finds the next one of those.\n')

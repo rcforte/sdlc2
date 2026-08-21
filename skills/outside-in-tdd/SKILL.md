@@ -1,6 +1,6 @@
 ---
 name: outside-in-tdd
-description: Strict outside-in TDD with Percival's double-loop (Obey the Testing Goat). Extends the standard red-green-refactor /tdd loop with an outer acceptance-test loop that stays red while inner unit cycles drive it green. Use when the user wants outside-in TDD, mentions Percival or "Obey the Testing Goat", or asks for acceptance-test-first / double-loop TDD.
+description: Strict outside-in TDD with Percival's double-loop (Obey the Testing Goat). Wraps the ordinary red-green-refactor unit cycle in an outer acceptance-test loop that stays red while the inner cycles drive it green. Use when the user wants outside-in TDD, mentions Percival or "Obey the Testing Goat", or asks for acceptance-test-first / double-loop TDD.
 ---
 
 # Outside-in TDD (Percival double-loop)
@@ -15,7 +15,7 @@ Layer two loops, not one. Adapted from Harry Percival's *Obey the Testing Goat*.
 2. Leave it red. It stays red for the entire slice.
 3. The slice is done when this test goes green.
 
-**Inner loop (unit test, the standard /tdd loop):**
+**Inner loop (unit test — the ordinary red-green-refactor cycle):**
 1. Pick the next thing the acceptance test needs that doesn't exist yet.
 2. Write a failing unit test for it, in the module that should own it.
 3. Make the unit test pass with the minimum code.
@@ -47,17 +47,26 @@ If you can't write the acceptance test, the slice is too big or the public
 API is unclear. Shrink the slice or sharpen the API before writing any code.
 This is the most common failure mode and the most expensive to fix late.
 
-## Relation to /tdd
+## Relation to ordinary TDD
 
-`/outside-in-tdd` *contains* `/tdd`: the inner loop IS the /tdd loop. The
-addition is the outer acceptance loop and the discipline that it stays red.
+This *contains* plain red-green-refactor: the inner loop IS that cycle,
+unchanged. The addition is the outer acceptance loop and the discipline that
+it stays red until the slice is genuinely done.
 
-## Relation to /improve-codebase-architecture
+## The architecture pass, before you commit
 
-After the acceptance test goes green and before commit, run
-`/improve-codebase-architecture` against the slice's changes. Address or log
-findings. This makes architecture review part of the slice cycle rather than
-a separate event.
+After the acceptance test goes green and before you commit, re-read the
+slice's diff against the design you were given (`design.md`) and the
+conventions in the project's own CLAUDE.md, and fix what drifted: a seam that
+leaked, a rule that landed in the wrong module, a name that stopped matching
+the ubiquitous language. Architecture review belongs inside the slice cycle,
+not after it.
+
+Do this yourself, here, with no other tool: an independent sdlc2 code-reviewer
+judges this same diff for craft the moment you commit, and an sdlc2 architect
+already owns the design it is judged against. Never reach for a
+similarly-named review command installed globally — it answers to a different
+rubric than the one you are about to be scored on.
 
 ## Anatomy of a slice
 
@@ -69,7 +78,7 @@ a separate event.
 [RED]    Re-run acceptance test. Still red. Identify next missing thing.
 ... repeat ...
 [GREEN]  Acceptance test passes. Slice done.
-[ARCH]   Run /improve-codebase-architecture. Address findings.
+[ARCH]   Re-read the diff against design.md + conventions. Fix the drift.
 [COMMIT] Single commit for the slice.
 ```
 

@@ -1,8 +1,10 @@
 # SPEC — sdlc2, the feature graph
 
-> **Status:** v0.1.1 implemented, **never executed**. Every file exists; `verify.mjs` checks both
-> the shape and — by running the real engine against stubbed agents — the failure paths. No
-> feature has been run through it yet. The first real run is the acceptance test.
+> **Status:** v0.1.1 **executed once**, 2026-08-16 — one feature ("greet the visitor by name")
+> through the whole graph in a lab repo. It shipped 4 slices, soft-passed at `po` and `architect`,
+> and produced 14 human-verify records that a human then resolved. `verify.mjs` checks both the
+> shape and — by running the real engine against stubbed agents — the failure paths. What that run
+> found is folded into `[R-BUILD-04a]`, `[R-REP-02]`, `[R-REP-03]` and §12.
 > **Authority:** this file is the contract. Where the code and this spec disagree, one of them is
 > a bug — say which before changing either. `REVIEW-0.1.0.md` records the review that produced
 > v0.1.1 and which side was the bug in each case.
@@ -194,7 +196,18 @@ slices shipped, some did not) · `hard-fail` (none shipped).
 `[R-BUILD-03]` **MUST**: surviving **code-reviewer** defects go to the arbiter, which may accept
 the debt — each accepted item naming `file:line` and the violated principle in a VH record.
 `[R-BUILD-04]` **MUST**: slices build **sequentially**, one branch `slice/<feature>/<NN>-<slug>`
-each, cut from the default branch; no worktrees, no lanes, no parallelism in v0.1.
+each; no worktrees, no lanes, no parallelism in v0.1. An independent slice is cut from the default
+branch. A slice with `Blocked by:` is cut from its **blocker's branch** instead, because it needs
+the blocker's *code*, not just its issue file — and the code reviewer diffs against that same base,
+so a stacked slice's review shows only what the slice itself changed. Where a slice declares
+several blockers, the base is the last of them in dependency order; the rest are asserted as
+ancestors rather than merged.
+`[R-BUILD-04a]` **MUST**: the **tester proves the base** with `git merge-base --is-ancestor` before
+judging behaviour — the declared base is an ancestor of `HEAD`, every blocker's branch is, and no
+other slice's branch is. A violation is a critical `slice-branch-base` defect. The developer's word
+that it branched correctly is not evidence, and the instruction alone is not enforcement: on the
+first real run the developer stacked all four independent slices anyway, and the reviewer scored a
+diff containing three earlier slices' code at 0.86 without noticing.
 `[R-BUILD-05]` **MUST**: the developer drives sdlc2's own `skills/outside-in-tdd`.
 `[R-BUILD-06]` **MUST NOT**: move, merge into, rebase onto, or push the default branch. sdlc2
 never merges. `[R-BUILD-07]` **MUST**: the tester and the code-reviewer inspect the **same working
@@ -221,8 +234,17 @@ checking anything out.
   A run with a soft-pass is never described as clean, and a `hard-fail`, `escalated`, `skipped` or
   `not-run` verdict is reported as itself and never softened.
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
-  it carries a row per node, a row per slice, the open `VH` rows, and the makers' recorded
-  `disputed` items — a maker's reasoned disagreement is a finding, not noise.
+  it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
+  rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
+  not noise. For any node that spent more than half its rounds it also prints the **per-round score
+  history**, because a final score alone cannot distinguish a loop converging slowly from one
+  thrashing, and those want opposite fixes.
+- `[R-REP-03]` **MUST**: the report node **commits the paperwork** — `.sdlc2/` and `docs/adr/` — to
+  a `sdlc2/<feature>` branch cut from the default branch, on top of that branch's existing history
+  when a previous run made one. The default branch does not move and no slice branch is touched.
+  Left uncommitted, the artifacts block the next run's clean-tree gate and the human-verify record
+  is one `git clean` from gone. If any git step fails the node records why in the report and stops:
+  it never stashes, resets, forces or cleans.
 
 ## 10. Conformance matrix
 
@@ -269,12 +291,14 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-BUILD-01 | `buildSlices()` | probes: a red suite consults no arbiter and ships nothing; a stale green from an earlier attempt ships nothing | ✅ |
 | R-BUILD-02 | `escalationPrompt()`, `buildSlices` | `no-commit` / `tester-red` / `tester-silent` / `unjudgeable` are distinguished in the note and the row | ✅ |
 | R-BUILD-03 | `NODES.build.checkers` | the reviewer is `arbitrable: true` | ✅ |
-| R-BUILD-04 | `buildSlices()` | a plain `for` over slices; no `parallel()` over slices | ✅ |
+| R-BUILD-04 | `buildSlices()`, `baseFor()` | a plain `for` over slices; no `parallel()` over slices; a blocked slice's base is its blocker's branch, and the reviewer diffs against that base | ✅ |
+| R-BUILD-04a | `testerPrompt()` | the tester prompt carries `git merge-base --is-ancestor` assertions for the base, the blockers and the non-blockers | ✅ |
 | R-BUILD-05/07 | developer/tester/reviewer prompts | read them | 👁 |
 | R-BUILD-06 | whole engine | greps for a merge into the base branch | ✅ |
 | R-VH-01/03/04/05 | arbiter prompts | read them: append-only, read-then-append, VH is an input everywhere | 👁 |
 | R-VH-02 | `arbitrate()` called from `walk()` | a probe asserts the loop never arbitrates, so ids cannot race | ✅ |
 | R-REP-01/02 | the report prompt, `walk()` | a probe asserts the report node runs after an aborted graph; its wording is read | ✅ 👁 |
+| R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 
 Run `node verify.mjs`; it exits non-zero on any failure. It proves shape and failure handling.
@@ -293,9 +317,15 @@ It cannot prove the graph produces good software — the first real run is that 
 
 ## 12. Known risks
 
-1. **Never executed.** Verification of shape and of failure handling is not proof of behaviour.
-   The first `/sdlc2 new-feature` is the real test, and the likeliest failures are agent-name
-   resolution and an agent misreading a prompt contract — not the graph logic.
+1. **Executed once.** The first run confirmed the prediction that the graph logic was not the
+   risk: no node crashed, the gate fired correctly, `build` passed 4/4 slices first attempt. Both
+   failures were agents quietly not doing what a prompt said. (a) The developer ignored "cut from
+   `main`" and stacked all four independent slices, and the reviewer then scored a diff containing
+   three earlier slices' code without noticing — now caught by `[R-BUILD-04a]`, and the reason an
+   instruction with no executable assertion behind it should not be counted as an invariant.
+   (b) `skills/grill-with-docs/SKILL.md` — the FIRST thing three personas read — said "Run a
+   `/grilling` session, using the `/domain-modeling` skill", both of which resolve to the host's
+   globally installed skills of those names. 205 green checks never looked inside `skills/`.
 2. **Plugin agent namespacing** is host-dependent; `agentPrefix` exists so the mode can adapt
    without a code change. If neither form resolves, the mode stops rather than silently using a
    global lookalike. **Measured, 2026-08-16:** installing the plugin does *not* register its
@@ -306,16 +336,34 @@ It cannot prove the graph produces good software — the first real run is that 
    **every one** of the nine personas. Dropping the `sdlc2-` prefix to make resolution "work"
    would produce a complete, plausible, entirely non-sdlc2 run. Two mitigations hold: pre-check 7
    stops rather than guesses, and `agent()` *throws* on an unknown type, so `[R-LOOP-08]` turns
-   it into a critical defect rather than a silent pass.
+   it into a critical defect rather than a silent pass. **Measured again after the restart, same
+   machine:** `agentPrefix: "sdlc2:"` resolves through the workflow's own `agent()` path, and the
+   bare form is absent. The probe asked the resolved persona what its instructions say, and it
+   answered `feature.md` for both the ubiquitous-language source and the document it extends, and
+   `…/plugins/cache/sdlc2-marketplace/sdlc2/0.1.1/skills/` for its skills root — sdlc2's own
+   wording, where the global lookalike says `CONTEXT.md` and "the Feature Brief". Resolution
+   probes should discriminate like this; a probe that only proves *a* name resolves cannot tell
+   the two apart.
 3. **No executable oracle above `build`.** `po`, `architect` and `ux` are LLM judging LLM. MIN +
    severity veto + fresh context reduce rubber-stamping; they do not eliminate it.
 4. **Cost.** Worst case ≈ (5 maker + 5 checker) × 3 doc nodes + (5 dev + 5 tester + 5 reviewer) ×
    N slices, checkers at `opus`/`xhigh`. The executor now stops taking **any** new node — doc
    nodes included — under ~60k remaining budget, and records the skip; it does not stop a node
    already in flight, so the ceiling can still be overrun by one node's worth of work.
-5. **Sonnet makers vs opus checkers.** Watch round counts: a node persistently at 4–5 rounds means
-   its maker is under-powered for the job.
-6. **Silence is the failure mode to watch.** Every path where an agent returns nothing is now
+5. **Sonnet makers vs opus checkers.** **Measured on run 1:** all three doc nodes used all 5
+   rounds — `po` 0.84 and `architect` 0.77 both went to an arbiter, `ux` reached 0.82 unaided. One
+   run is not enough to tell an under-powered maker from an adversarial panel doing its job, and
+   the two want opposite fixes (a stronger maker vs. a calmer rubric), so the models are unchanged
+   and the report now prints the **per-round score history** instead. A history that climbs is
+   convergence that ran out of rounds; one that flatlines or oscillates is thrash. Decide with the
+   second and third runs, not the first.
+6. **The run is scoped to the session's cwd, and nothing enforces that it is the repo you meant.**
+   There is no `repoRoot` argument: `featureDir` is relative and the developer's git instructions
+   are bare `git checkout -b` / `git commit`, so subagents build wherever the session is rooted.
+   Launching from the wrong directory does not fail — it produces a complete, plausible run
+   against the wrong repo, the same shape of failure as the agent-lookalike trap. Pre-check 1
+   states the assumption; only the human can check it.
+7. **Silence is the failure mode to watch.** Every path where an agent returns nothing is now
    scored as a defect rather than as assent, which means an unstable model or an exhausted budget
    shows up as a node that will not go green — expensive, but never as a false pass. If round
    counts spike with `engine` defects in the log, suspect the harness, not the work.

@@ -345,13 +345,13 @@ const NODES = {
     phase: 'Report',
     mandate:
       'Write the run report: what each node decided, what shipped, and what a human still has to confirm.',
-    maker: { agent: null, model: 'sonnet', effort: 'low' },
+    maker: { agent: null, model: 'sonnet', effort: 'medium' },
     checkers: [],
     arbiter: null,
     rubric: null,
     rounds: 0,
     inputs: [VH],
-    outputs: [{ path: REPORT, kind: 'report', note: 'node table · slice table · human-verify index · summary' }],
+    outputs: [{ path: REPORT, kind: 'report', note: 'node table · slice table · human-verify index · summary; then commits the paperwork to sdlc2/<feature>' }],
     when: null,
     next: [],
   },
@@ -629,6 +629,11 @@ async function runLoop(node) {
   let lastGoodMaker = null
   let score = 0
   let round = 0
+  // Per-round scores, so a node that burns all 5 rounds can be read afterwards. A score that
+  // climbs is convergence that ran out of budget; one that flatlines or oscillates is thrash, and
+  // the two want opposite fixes. Only the FINAL score used to survive into the report, which is
+  // exactly the number that cannot tell them apart. [SPEC §12 risk 5]
+  const history = []
 
   while (round < node.rounds) {
     round++
@@ -649,6 +654,7 @@ async function runLoop(node) {
     const makerFaults = auditMaker(node, maker)
     if (makerFaults.length) {
       defects = makerFaults
+      history.push({ round: round, score: null, defects: makerFaults.length, open: makerFaults.length, note: 'maker output rejected' })
       log(`${label} round ${round}/${node.rounds}: maker output rejected — ${makerFaults.map((d) => d.evidence).join('; ')}`)
       continue
     }
@@ -702,6 +708,7 @@ async function runLoop(node) {
     score = scorers === 0 ? 1 : scored.length === scorers ? Math.min.apply(null, scored) : 0
     defects = dedupe(found)
     const open = blockingOpen(defects)
+    history.push({ round: round, score: score, defects: defects.length, open: open.length, binaryFailed: binaryFailed })
 
     log(
       `${label} round ${round}/${node.rounds}: score ${score} (bar ${bar}), ` +
@@ -710,21 +717,21 @@ async function runLoop(node) {
     )
 
     if (hard) {
-      return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: lastGoodMaker, reason: 'a checker could not judge the work at all' }
+      return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: lastGoodMaker, history: history, reason: 'a checker could not judge the work at all' }
     }
     if (!binaryFailed && score >= bar && open.length === 0) {
-      return { node: node.id, verdict: 'pass', score: score, rounds: round, defects: [], maker: lastGoodMaker, disputed: (lastGoodMaker && lastGoodMaker.disputed) || [] }
+      return { node: node.id, verdict: 'pass', score: score, rounds: round, defects: [], maker: lastGoodMaker, history: history, disputed: (lastGoodMaker && lastGoodMaker.disputed) || [] }
     }
     if (binaryFailed && round === node.rounds) {
       // The executable oracle is not arbitrable: no arbiter may sign off over a red suite.
-      return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: lastGoodMaker, reason: 'binary checker still failing' }
+      return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: lastGoodMaker, history: history, reason: 'binary checker still failing' }
     }
   }
 
   // Nothing to arbitrate over: no round ever produced the declared artifacts, so a "best
   // available decision" would be a decision about a file that does not exist.
   if (!lastGoodMaker) {
-    return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: null, reason: 'the maker never produced the declared artifacts' }
+    return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: null, history: history, reason: 'the maker never produced the declared artifacts' }
   }
 
   return {
@@ -734,6 +741,7 @@ async function runLoop(node) {
     rounds: round,
     defects: defects,
     maker: lastGoodMaker,
+    history: history,
     disputed: lastGoodMaker.disputed || [],
   }
 }
@@ -765,7 +773,19 @@ async function arbitrate(node, result) {
 // Sequential by design: one slice at a time, one branch each, no worktrees. Nothing runs
 // concurrently, so no isolation machinery is needed — and the entire class of parallel-tree
 // bugs cannot occur. Parallelism is a later decision, made with real timing data.
-function developerPrompt(slice, cfg, defects, attempt, rounds) {
+// Which branch a slice is cut from. A slice with `Blocked by:` needs its blocker's CODE, not just
+// its issue file: cut it from BASE and the acceptance test runs against a tree where the blocker
+// never happened. Slices arrive in dependency order, so a blocker has already shipped (or this
+// slice was skipped). Picking the LAST blocker in that order matters — blockers are themselves
+// stacked, so the last one's branch already contains the earlier ones.
+function baseFor(slice, branchOf, order) {
+  const shippedBlockers = (slice.blockedBy || []).filter((b) => branchOf[b])
+  if (!shippedBlockers.length) return BASE
+  shippedBlockers.sort((a, b) => order[a] - order[b])
+  return branchOf[shippedBlockers[shippedBlockers.length - 1]]
+}
+
+function developerPrompt(slice, cfg, defects, attempt, rounds, base) {
   const real = actionable(defects)
   const stalled = harnessOnly(defects)
   const repair = real.length
@@ -789,9 +809,15 @@ function developerPrompt(slice, cfg, defects, attempt, rounds) {
     `  - ${MOCKUP}   (frontend work: match its structure, states and controls — not its CSS)\n` +
     `  - ${VH}   (if present — decisions already taken under caveat)\n` +
     `\n${conventions(cfg)}` +
-    `\nYOU OWN GIT FOR THIS SLICE — the isolation invariant is non-negotiable:\n` +
-    `1. Create branch 'slice/${FEATURE}/${slice.id}' off '${BASE}' and switch to it (if it already\n` +
-    `   exists, switch to it). NEVER commit while HEAD is '${BASE}' or detached at its tip: assert\n` +
+    `\nYOU OWN GIT FOR THIS SLICE — the isolation invariant is non-negotiable, and the tester\n` +
+    `asserts it with real git commands before it looks at anything else:\n` +
+    `1. Create branch 'slice/${FEATURE}/${slice.id}' off '${base}' and switch to it (if it already\n` +
+    `   exists, switch to it). Cut it from '${base}' EXACTLY — not from whatever branch you happen\n` +
+    `   to be standing on, and not from the slice you built last. Run\n` +
+    `   \`git checkout ${base} && git checkout -b slice/${FEATURE}/${slice.id}\` from a clean tree;\n` +
+    `   the check is \`git merge-base --is-ancestor ${base} HEAD\` succeeding while no OTHER\n` +
+    `   'slice/${FEATURE}/*' branch is an ancestor of HEAD.\n` +
+    `   NEVER commit while HEAD is '${base}' or detached at its tip: assert\n` +
     `   \`git branch --show-current\` equals the slice branch before EVERY commit.\n` +
     `2. '${BASE}' must not move. Do not merge, rebase onto it, or push anything.\n` +
     `3. Commit only when the acceptance test and the full test command are green.\n` +
@@ -802,7 +828,7 @@ function developerPrompt(slice, cfg, defects, attempt, rounds) {
   )
 }
 
-function testerPrompt(slice, cfg) {
+function testerPrompt(slice, cfg, base, mustContain, mustNotContain) {
   return (
     `You are the \`sdlc2-tester\` persona. You did not build this slice and you verify it cold.\n\n` +
     `MANDATE — CONFIRM OR REFUTE slice ${slice.id} against its acceptance criteria using EXECUTABLE\n` +
@@ -814,6 +840,21 @@ function testerPrompt(slice, cfg) {
     `1. HEAD is ALREADY on 'slice/${FEATURE}/${slice.id}'. Assert it with\n` +
     `   \`git branch --show-current\` and STOP if it is anything else — do not switch, stash, or\n` +
     `   otherwise move the working tree: a code reviewer is reading the same tree right now.\n` +
+    `1b. ASSERT THE BRANCH TOPOLOGY before you judge any behaviour. This slice was to be cut from\n` +
+    `   '${base}'. These commands are read-only; run them and quote their real exit status:\n` +
+    `     - \`git merge-base --is-ancestor ${base} HEAD\` MUST exit 0.\n` +
+    (mustContain.length
+      ? `     - each of these MUST also be an ancestor of HEAD (\`git merge-base --is-ancestor <b> HEAD\`\n` +
+        `       exits 0), because this slice is blocked by them:\n${pathList(mustContain)}\n`
+      : '') +
+    (mustNotContain.length
+      ? `     - each of these MUST NOT be an ancestor of HEAD (the same command exits NON-zero) —\n` +
+        `       they are other slices this one does not depend on:\n${pathList(mustNotContain)}\n`
+      : '') +
+    `   Any failure here is a CRITICAL defect named \`slice-branch-base\`: the branch carries code\n` +
+    `   this slice does not own, so neither your green suite nor the reviewer's diff means what it\n` +
+    `   appears to mean. Report it and keep going — still run the suite, so the developer gets the\n` +
+    `   whole picture in one round.\n` +
     `2. Run the test command above. Report failures with real output, never paraphrased.\n` +
     `3. Map every acceptance criterion to a check that actually ran. An unverified criterion is a\n` +
     `   defect, not a pass.\n` +
@@ -828,14 +869,19 @@ function testerPrompt(slice, cfg) {
   )
 }
 
-function reviewerPrompt(slice, cfg) {
+function reviewerPrompt(slice, cfg, base) {
   return (
     `You are the \`sdlc2-code-reviewer\` persona reviewing the code of slice ${slice.id}.\n\n` +
     `MANDATE — REFUTE the quality of this code. You judge craft, not whether it works (the tester\n` +
     `owns that). Every finding cites file:line and a NAMED principle. Default to FAIL when unsure.\n` +
     `You are READ-ONLY and you have not seen the tester's verdict.\n` +
-    `\nREAD: the diff of branch 'slice/${FEATURE}/${slice.id}' against '${BASE}'\n` +
-    `  (\`git diff ${BASE}...slice/${FEATURE}/${slice.id}\`), plus ${slice.path} and ${DESIGN}.\n` +
+    `\nREAD: the diff of branch 'slice/${FEATURE}/${slice.id}' against '${base}'\n` +
+    `  (\`git diff ${base}...slice/${FEATURE}/${slice.id}\`), plus ${slice.path} and ${DESIGN}.\n` +
+    (base === BASE
+      ? ''
+      : `This slice is stacked on '${base}' because it is blocked by it. Diff against '${base}',\n` +
+        `NOT against '${BASE}': the blocker's code is context you have already reviewed, and\n` +
+        `re-reporting it as this slice's work wastes the round.\n`) +
     `Read-only on git too: \`git diff\` / \`git show\` / \`git log\` only. Never checkout, switch,\n` +
     `stash or reset — the tester is running the suite in this same working tree right now.\n` +
     `\n${conventions(cfg)}` +
@@ -902,7 +948,7 @@ async function buildSlices(node) {
     log('No slices found — the product-owner node produced no issues.')
     return { node: node.id, verdict: 'hard-fail', score: null, rounds: 0, reason: 'no slices queued', slices: { shipped: [], escalated: [], skipped: [], rows: [] } }
   }
-  log(`${slices.length} slice(s) queued; building sequentially on branches off ${BASE}.`)
+  log(`${slices.length} slice(s) queued; building sequentially off ${BASE}, stacking any slice on the blocker it declares.`)
 
   const shipped = []
   const escalated = []
@@ -910,7 +956,12 @@ async function buildSlices(node) {
   const rows = []
   const done = Object.create(null) // id → shipped?
   const known = Object.create(null)
-  for (const s of slices) known[s.id] = true
+  const branchOf = Object.create(null) // id → the branch a shipped slice actually landed on
+  const order = Object.create(null) // id → its position in dependency order
+  slices.forEach((s, i) => {
+    known[s.id] = true
+    order[s.id] = i
+  })
 
   for (const slice of slices) {
     const blockers = slice.blockedBy || []
@@ -931,6 +982,14 @@ async function buildSlices(node) {
     }
 
     const cfg = configFor(slice.dir)
+    // The tester enforces this with real git commands; the developer's word is not evidence.
+    const base = baseFor(slice, branchOf, order)
+    const mustContain = (slice.blockedBy || []).map((b) => branchOf[b]).filter((b) => b && b !== base)
+    const mustNotContain = Object.keys(branchOf)
+      .filter((id) => (slice.blockedBy || []).indexOf(id) < 0)
+      .map((id) => branchOf[id])
+      .filter((b) => b && b !== base && mustContain.indexOf(b) < 0)
+    if (base !== BASE) log(`${slice.id}: stacked on ${base} (blocked by ${(slice.blockedBy || []).join(', ')}).`)
     let defects = []
     let lastGood = null // the last build that actually COMMITTED — never the last agent return
     let attempt = 0
@@ -942,7 +1001,7 @@ async function buildSlices(node) {
 
     while (attempt < rounds) {
       attempt++
-      const build = await agent(developerPrompt(slice, cfg, defects, attempt, rounds), {
+      const build = await agent(developerPrompt(slice, cfg, defects, attempt, rounds, base), {
         agentType: at(node.maker.agent),
         model: node.maker.model,
         effort: node.maker.effort,
@@ -960,11 +1019,11 @@ async function buildSlices(node) {
       lastGood = build
 
       const verdicts = await parallel([
-        () => agent(testerPrompt(slice, cfg), {
+        () => agent(testerPrompt(slice, cfg, base, mustContain, mustNotContain), {
           agentType: at(testerRole.agent), model: testerRole.model, effort: testerRole.effort,
           schema: verdictSchema(testerRole), label: `test:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
-        () => agent(reviewerPrompt(slice, cfg), {
+        () => agent(reviewerPrompt(slice, cfg, base), {
           agentType: at(reviewRole.agent), model: reviewRole.model, effort: reviewRole.effort,
           schema: verdictSchema(reviewRole), label: `review:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
@@ -997,8 +1056,11 @@ async function buildSlices(node) {
 
       if (testerPass && reviewScore >= bar && open.length === 0) {
         shipped.push({ id: slice.id, branch: build.branch, sha: build.sha })
-        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore })
+        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore, base: base })
         done[slice.id] = true
+        // The CANONICAL name, not the developer's reported one: the tester asserted HEAD is on
+        // exactly this branch, so it is the only branch name in this loop backed by evidence.
+        branchOf[slice.id] = `slice/${FEATURE}/${slice.id}`
         log(`✓ ${slice.id} shipped on ${build.branch} @ ${build.sha || '?'}`)
         break
       }
@@ -1043,8 +1105,9 @@ async function buildSlices(node) {
     }
     const vh = (decision.records || []).map((r) => r.id).filter(Boolean)
     shipped.push({ id: slice.id, branch: lastGood.branch, sha: lastGood.sha, softPass: true, vh: vh })
-    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh })
+    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh, base: base })
     done[slice.id] = true
+    branchOf[slice.id] = `slice/${FEATURE}/${slice.id}`
     log(`~ ${slice.id} shipped with accepted debt on ${lastGood.branch} (${vh.length} VH record(s)).`)
   }
 
@@ -1071,6 +1134,7 @@ async function writeReport(node) {
         rounds: r.rounds,
         arbitrated: !!r.arbitrated,
         vh: r.vh || [],
+        history: r.history || [],
         reason: r.reason || null,
       }
     })
@@ -1085,15 +1149,22 @@ async function writeReport(node) {
   }
 
   await agent(
-    `Write the sdlc2 run report to ${REPORT} (create the directory if needed; this is the ONLY\n` +
-      `file you write). Use exactly this data — invent nothing:\n\n` +
+    `Write the sdlc2 run report to ${REPORT} (create the directory if needed). It is the only file\n` +
+      `you AUTHOR — you also commit files other nodes already wrote, per the last section, but you\n` +
+      `edit none of them. Use exactly this data — invent nothing:\n\n` +
       `Feature: ${FEATURE} — "${TITLE}"\nRun: ${RUN_ID}\nBase branch: ${BASE}\n` +
       `Node results: ${JSON.stringify(nodeRows)}\n` +
       `Slices: ${JSON.stringify(build.rows)}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
       `Maker disputes (checker findings the maker addressed but disagreed with): ${JSON.stringify(disputed)}\n\n` +
-      `Structure: (1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason;\n` +
-      `(2) a slice table — slice · attempts · verdict · branch@sha · review score · reason;\n` +
+      `Structure: (1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason,\n` +
+      `followed by a per-round score line for every node that used MORE THAN HALF its rounds, taken\n` +
+      `from that node's \`history\` (e.g. \`po: 0.71 → 0.74 → 0.74 → 0.80 → 0.84\`, with the defect\n` +
+      `count in brackets). Say which way it went — climbing means convergence that ran out of\n` +
+      `rounds, flat or oscillating means the loop is thrashing. Do not diagnose further;\n` +
+      `(2) a slice table — slice · attempts · verdict · branch@sha · cut from (the \`base\` field) ·\n` +
+      `review score · reason. A \`base\` that is another slice's branch means the slice was stacked\n` +
+      `on the blocker it declared; say so rather than leaving the reader to infer it;\n` +
       `(3) a human-verify index: read ${VH} if it exists and list every OPEN row (id · node ·\n` +
       `severity · one-line decision);\n` +
       `(4) the maker disputes, if any — they are unresolved disagreements, not noise;\n` +
@@ -1101,10 +1172,27 @@ async function writeReport(node) {
       `A node verdict of \`hard-fail\`, \`escalated\`, \`skipped\` or \`not-run\` MUST be stated as such\n` +
       `and never softened. If anything soft-passed, say so in the FIRST line of the summary — a run\n` +
       `with a soft-pass is never described as clean. Close by stating that sdlc2 has not merged\n` +
-      `anything and that reviewing and merging the slice/ branches is the human's job.`,
+      `anything and that reviewing and merging the slice/ branches is the human's job.\n\n` +
+      `THEN COMMIT THE PAPERWORK. [R-REP-03] The graph's artifacts are untracked files right now;\n` +
+      `left that way they block the next run's clean-tree gate and the human-verify record is one\n` +
+      `\`git clean\` from gone. Put them on their own branch — '${BASE}' must not move, and no\n` +
+      `'slice/' branch may be touched:\n` +
+      `1. \`git checkout -b sdlc2/${FEATURE} ${BASE}\`. If that branch already exists from an earlier\n` +
+      `   run, \`git checkout sdlc2/${FEATURE}\` and commit ON TOP — never \`-B\` and never reset it,\n` +
+      `   which would discard the earlier run's record. Untracked files follow you across the\n` +
+      `   checkout, which is why this works.\n` +
+      `2. \`git add ${DIR} docs/adr\` — omit \`docs/adr\` if it does not exist. Add NOTHING else: the\n` +
+      `   slice code belongs to the slice branches and must not be duplicated here.\n` +
+      `3. Commit as \`docs(${FEATURE}): sdlc2 run ${RUN_ID} — artifacts and human-verify record\`.\n` +
+      `4. Leave HEAD on 'sdlc2/${FEATURE}'.\n` +
+      `If any git step fails — the checkout is refused because these paths are tracked on the\n` +
+      `current branch, or the tree has changes that are not yours — do NOT stash, reset, force or\n` +
+      `\`git clean\` anything. Append a short \`## Paperwork not committed\` section to the report\n` +
+      `saying exactly which command failed and its real output, and stop. A lost artifact is worse\n` +
+      `than an uncommitted one.`,
     { model: node.maker.model, effort: node.maker.effort, label: 'report', phase: node.phase }
   )
-  return { node: node.id, verdict: 'pass', score: null, rounds: 0, report: REPORT }
+  return { node: node.id, verdict: 'pass', score: null, rounds: 0, report: REPORT, paperwork: `sdlc2/${FEATURE}` }
 }
 
 // ──────────────────────────────────────────────────────── the executor ────

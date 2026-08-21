@@ -1,59 +1,81 @@
-# HANDOFF — resume point, 2026-08-16
+# HANDOFF — resume point, 2026-08-21
 
 > Transient working state, not plugin content. **Delete this file when the arc below completes.**
 
 ## Do this first
 
-Claude Code has been restarted so the `sdlc2-*` agents resolve. Confirm, then run the first
-feature through the graph:
+**Step 4: re-run the lab against the fixed harness.** Start Claude Code in
+`~/dev/code/sdlc2-lab` — not in this repo, and not with `/add-dir`. sdlc2 has no `repoRoot`, so
+the graph builds in whatever repo the *session* is rooted in (pre-check 1, `SPEC.md` §12 risk 6).
 
-```bash
-cd ~/dev/code/sdlc2-lab
-```
-```
-/sdlc2 new-feature "greet the visitor by name"
-```
+The lab is ready: `main` carries run 1's four slices, its artifacts and the 14 resolved VH
+records; the suite is green (31 tests, 4 files); the tree is clean and the `slice/*` branches are
+deleted. `agentPrefix: "sdlc2:"`.
 
-The seed already exists, so it will **not** grill you — it goes straight to the config check,
-the baseline, and then the graph. Expect `po → architect ∥ ux → build → report`, roughly 11
-agent calls if everything passes first time, ~45 worst case.
+Run a **2–3 slice feature with a real `Blocked by:` chain** — that is what exercises the branch
+stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, in this order:
 
-**Before spending the run**, confirm the personas resolve. Neither `sdlc2-product-owner` nor
-`sdlc2:sdlc2-product-owner` resolved before the restart; the cheap probe is a one-agent workflow
-calling `agent(..., { agentType: 'sdlc2-product-owner' })` and seeing whether it throws. Set
-`agentPrefix` in the workflow args to `""` for the bare form or `"sdlc2:"` for the namespaced one.
+1. Did the tester actually run the `git merge-base --is-ancestor` assertions? They are the whole
+   enforcement; if the tester skips them, the invariant is back to being a wish.
+2. Was the blocked slice cut from its blocker, and the independent one from `main`?
+3. Did the report node commit the paperwork to `sdlc2/<feature>`, leaving a clean tree?
+4. Do the per-round score histories climb, flatline, or oscillate? Two more runs of that decides
+   whether the doc-node makers are under-powered — see `SPEC.md` §12 risk 5.
 
-**If they still do not resolve, stop.** Do not drop the `sdlc2-` prefix. See "The trap" below.
+One lab hygiene item first: `tsconfig.tsbuildinfo` is **tracked** in the lab, and `npm run build`
+rewrites it. That dirties the tree and will either block the clean-tree gate or get swept into a
+slice commit. `git rm --cached tsconfig.tsbuildinfo` and add it to `.gitignore` before running.
 
 ## Where we are
 
 | Step | What | State |
 |---|---|---|
 | 1 | Build the minimal lab | **done** — `~/dev/code/sdlc2-lab`, green, committed |
-| 2 | Run one thin feature through the graph as-is | **next** — blocked only by the restart |
-| 3 | Fix what step 2 reveals, **plus Part 0** | not started |
-| 4 | Re-run the lab, incl. a 2–3 slice feature to exercise stacking | not started |
+| 2 | Run one thin feature through the graph as-is | **done** — run `nf-20260816T0246Z`, 4 slices, 2 soft-passes, 14 VH records, all resolved and merged to lab `main` |
+| 3 | Fix what step 2 reveals, **plus Part 0** | **done** — v0.1.2, all three Part 0 items + the two defects run 1 exposed; 220 checks green |
+| 4 | Re-run the lab, incl. a 2–3 slice feature to exercise stacking | **next** |
 | 5 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
-The order is deliberate: Part 0 fixes problems predicted by *reading*. `SPEC.md` §12 says the
-likeliest real failure is an agent misreading a prompt contract, which only running finds. Every
-bug in this project so far was found by running something — the review's stub probes, and
-`install.sh`'s three on first execution.
+The order held up. Running first was right: reading predicted three fixes and run 1 produced two
+more that reading had missed for months — one of them on the first step of three personas. Every
+bug in this project has now been found by executing something, without exception.
 
-## Part 0 — scoped, not built
+## What run 1 found, and what v0.1.2 does about it
 
-1. **Stack dependent slice branches.** `developerPrompt` cuts every branch off `BASE`, so a slice
-   with `Blocked by:` does not contain its blocker's code. Record each shipped slice's branch;
-   base a dependent slice on its blocker. **`reviewerPrompt` needs the same base** or it replays
-   the blocker's diff into the dependent's review. Amend `R-BUILD-04`.
-2. **Report node commits the paperwork** to `sdlc2/<feature>` — `.sdlc2/` and `docs/adr/`. `main`
-   never moves. Removes the clean-tree friction on the next run and makes the human-verify record
-   durable. New `R-REP-03`.
-3. **Close the `skills/` independence hole.** `skills/outside-in-tdd/SKILL.md` points at `/tdd`
-   (4×) and `/improve-codebase-architecture` (3×), neither bundled. `verify.mjs`'s stray-skill
-   check walks `agentFiles` only — extend it to `skills/*/*.md`. Same class as H13.
+Run 1 is the evidence base. The graph logic was never the risk — no node crashed, the `ux` gate
+fired correctly, `build` passed 4/4 slices on the first attempt at 0.85–0.86. Both real failures
+were **an agent quietly not doing what a prompt said**, which is exactly what `SPEC.md` §12
+predicted and exactly what no amount of reading finds.
 
-~60–80 lines of engine change, three spec edits, one skill rewrite, ~8 new checks.
+1. **The developer stacked four independent slices.** `developerPrompt` said "off `main`"; the
+   branches came out `02 ⊃ 01`, `03 ⊃ 02`, `04 ⊃ 03`. The reviewer then diffed slice 04 against
+   `main` — three earlier slices' code included — and scored it 0.86 without noticing. *Fixed:*
+   `baseFor()` gives a blocked slice its blocker's branch and an independent one `BASE`; the
+   reviewer diffs against that same base; and the **tester now proves it** with
+   `git merge-base --is-ancestor`, because an instruction with no executable assertion behind it
+   is not an invariant. New `[R-BUILD-04a]`, probe P14 (10 assertions).
+2. **`skills/grill-with-docs/SKILL.md` sent three personas to the host.** Its entire body was
+   "Run a `/grilling` session, using the `/domain-modeling` skill" — both resolve to globally
+   installed skills of those names, and this file is the FIRST thing `po`, `architect` and
+   `ux-design` read. `skills/outside-in-tdd/SKILL.md` had the same problem with `/tdd` (4×) and
+   `/improve-codebase-architecture` (3×). 205 green checks never looked inside `skills/`.
+   *Fixed:* both rewritten; `verify.mjs` now walks `skills/*/*.md` for slash-commands, stray
+   skill names and unrooted references — three new checks.
+3. **The artifacts were left uncommitted** and a human hand-committed them (`506553e`).
+   *Fixed:* `[R-REP-03]` — the report node commits `.sdlc2/` and `docs/adr/` to `sdlc2/<feature>`
+   off the default branch, never resetting an existing one, and never stashing/cleaning if a git
+   step fails.
+4. **All three doc nodes burned all 5 rounds** (`po` 0.84 and `architect` 0.77 arbitrated, `ux`
+   0.82 clean). *Deliberately NOT fixed:* one run cannot distinguish an under-powered maker from
+   an adversarial panel working correctly, and the two want opposite fixes. The report now prints
+   the **per-round score history** so runs 2 and 3 can answer it with data. Models unchanged.
+
+Also fixed while in there: the "engine never merges" grep matched `git merge-base` (read-only
+plumbing) and had to be taught the difference; the report node's effort went `low` → `medium`
+now that it does branch surgery.
+
+**Still open from run 1, in the lab, not the harness:** VH-07(c) and VH-10 — the latter needs a
+real screen reader.
 
 ## The trap — read before touching agent resolution
 
@@ -93,22 +115,24 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
 
 ## Repo states
 
-- **`~/dev/code/sdlc2`** — plugin. `main` at `b96f61c` + this handoff commit. `node verify.mjs`
-  passes 205 checks. sdlc2 v0.1.1 installed at user scope.
-- **`~/dev/code/sdlc2-lab`** — lab. `main`, clean, two commits, baseline green in ~600ms.
-  React + TS + Vitest + RTL. Seed at `.sdlc2/features/greet-visitor/feature.md`.
+- **`~/dev/code/sdlc2`** — plugin. `main` at `40cc056` + **uncommitted** v0.1.2 work: the engine
+  (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`), both skill
+  rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14), `VERSION` and
+  `plugin.json` at `0.1.2`. `node verify.mjs` passes **220 checks**.
+- **Installed vs local.** v0.1.1 is what is installed, from the GitHub marketplace clone at
+  `b96f61c`. **The lab run will use v0.1.1 until v0.1.2 is pushed and updated** — none of the
+  fixes above are live yet. Push, then `claude plugin update sdlc2@sdlc2-marketplace`, then
+  restart, and re-probe resolution before spending the run.
+- **`~/dev/code/sdlc2-lab`** — lab. `main` at `4169a34`, clean, 6 commits, suite green (31 tests,
+  4 files, ~1.9s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
+  to `main` and can be deleted whenever.
 
-## What to watch in the first run
+## What to watch in run 2
 
-Predictions worth checking against reality:
-
-- **Round counts.** Sonnet makers vs opus/`xhigh` checkers. `SPEC.md` §12 risk 5: a node
-  persistently at 4–5 rounds means its maker is under-powered.
-- **Whether the doc nodes converge or thrash.** A soft-pass on the first run is information, not
-  failure.
-- **Whether the developer respects the git isolation invariant** — the one instruction with no
-  automated enforcement behind it.
-- **`hasUiStories`.** The feature plainly has a screen; if the `po` sets it false, the `ux` node is
-  skipped with a single log line and `R-PO-04` is violated in the least visible way possible.
-- **Artifact clean-up.** Until Part 0 item 2 lands, `.sdlc2/` is left uncommitted and the *next*
-  run is blocked by the clean-tree gate. Commit or delete it after the run.
+- **Whether the tester actually runs the base assertions.** Everything else here rests on it.
+- **Round counts and the new score histories.** Climbing vs flat is the whole question; see
+  `SPEC.md` §12 risk 5.
+- **Whether the report node's git steps work** — it is `sonnet`/`medium` doing branch surgery, and
+  its failure mode is meant to be a `## Paperwork not committed` section, never a lost artifact.
+- **`hasUiStories`.** If the `po` sets it false on a feature with a screen, `ux` is skipped with a
+  single log line and `R-PO-04` is violated in the least visible way possible. Still unenforced.

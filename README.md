@@ -13,12 +13,15 @@ against a weighted rubric. Five rounds, then an **arbiter** decides, writes down
 and why, and the graph keeps going — it documents instead of stalling. One thing is never
 arbitrable: a **red test suite**. No arbiter, no score, no deadline commits over it.
 
-**Status: v0.1.1 — implemented, never executed.** Verified in two ways: structurally (manifests,
-node table, rubric weights, prompt hygiene, independence) and *behaviourally* — `verify.mjs` runs
-the real engine against stubbed agents and drives it through its failure paths, so a dead checker,
-a vanished developer and a crashed node are proven not to produce a green run. The first real run
-is still the acceptance test. See `SPEC.md` §12, and `REVIEW-0.1.0.md` for the review those fixes
-came from.
+**Status: v0.1.2 — executed once.** One feature went through the whole graph on 2026-08-16: four
+slices shipped, two nodes soft-passed, fourteen human-verify records came out the other end. It
+also found two things 205 green checks had not — a developer that ignored which branch to build
+on, and a bundled skill whose one line sent three personas to the host's skills — both fixed here,
+both now asserted. Verified structurally (manifests, node table, rubric weights, prompt hygiene,
+independence) and *behaviourally*: `verify.mjs` runs the real engine against stubbed agents and
+drives it through its failure paths, so a dead checker, a vanished developer and a crashed node
+are proven not to produce a green run. See `SPEC.md` §12, and `REVIEW-0.1.0.md` for the earlier
+review.
 
 ## Install
 

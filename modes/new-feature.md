@@ -6,8 +6,9 @@ rounds is **arbitrated and documented**, never stalled. The graph is autonomous 
 only human moments are the grilling that precedes it and the merge that follows it.
 
 **Contract:** when this returns, every slice that passed is committed on its own
-`slice/<feature>/<NN>-<slug>` branch, every slice that failed is marked for you, and every
-unresolved judgement call is a row in `VERIFY-WITH-HUMAN.md`. **sdlc2 never merges.**
+`slice/<feature>/<NN>-<slug>` branch, every slice that failed is marked for you, every unresolved
+judgement call is a row in `VERIFY-WITH-HUMAN.md`, and the paperwork is committed to
+`sdlc2/<feature>` so nothing is left loose in your tree. **sdlc2 never merges.**
 
 ---
 
@@ -15,7 +16,15 @@ unresolved judgement call is a row in `VERIFY-WITH-HUMAN.md`. **sdlc2 never merg
 
 Do these in order and **stop** on the first failure, saying exactly what to fix.
 
-1. **Git.** The repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
+1. **Git.** Your **session's working directory is the target repo** — sdlc2 has no `repoRoot`
+   argument. The engine builds `featureDir` as a relative path and hands the developer bare
+   `git checkout -b` / `git commit` commands, and subagents inherit the session's cwd. A session
+   rooted anywhere else will cut `slice/*` branches and write `.sdlc2/` into *that* repo instead,
+   silently and plausibly. `cd` in a shell command does not fix it; the session root reasserts
+   itself on the next call. If you are not rooted at the repo you mean to build in, **stop** and
+   say it must be relaunched there.
+
+   Then: the repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
    the run (slices commit; stray changes would be swept into them). Resolve the default branch:
 
    ```bash
@@ -142,7 +151,12 @@ order:
 3. **Human-verify** — the count and one-line summary of each new `VH-NN` row.
 4. **Next action** — review the `slice/<feature>/…` branches and
    `.sdlc2/features/<slug>/VERIFY-WITH-HUMAN.md`, then merge yourself. State that sdlc2 has not
-   merged and will not.
+   merged and will not. Note which slices were **stacked**: a slice with `Blocked by:` is cut from
+   its blocker's branch, so merging it merges the blocker too — merge in slice order.
+5. **The paperwork branch** — the artifacts and any ADRs are committed to `sdlc2/<feature>`, cut
+   from the default branch, and `HEAD` is left there. Say so: the working tree is clean and the
+   next run is not blocked. If the report carries a `## Paperwork not committed` section, that
+   step failed — quote it, because the artifacts are then still untracked.
 
 Point at the run report: `.sdlc2/features/<slug>/runs/<runId>.md`. It is written on **every**
 outcome, including a graph that aborted — if it is missing, the workflow itself failed to start
