@@ -124,9 +124,10 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
   `node verify.mjs` passes **220 checks**.
 - **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
-  0.1.1 to 0.1.2 on 2026-08-21, and the cache at
-  `~/.claude/plugins/cache/sdlc2-marketplace/sdlc2/0.1.2` is byte-identical to this repo for
-  `new-feature.workflow.js`, `modes/`, `skills/` and `VERSION`. Claude Code was restarted to apply
+  0.1.1 to 0.1.2 on 2026-08-21, and the resolved `${CLAUDE_PLUGIN_ROOT}` for 0.1.2 (under the
+  marketplace plugin cache — ask a probe agent for it rather than hardcoding it here, which
+  `[R-PKG-03]` forbids) is byte-identical to this repo for `new-feature.workflow.js`, `modes/`,
+  `skills/` and `VERSION`. Claude Code was restarted to apply
   it. **Re-probe agent resolution before spending the run** — a restart is exactly when it broke
   last time.
 - **`~/dev/code/sdlc2-lab`** — lab. `main` at `4169a34`, clean, 6 commits, suite green (31 tests,
