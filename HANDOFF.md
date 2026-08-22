@@ -10,7 +10,11 @@ the graph builds in whatever repo the *session* is rooted in (pre-check 1, `SPEC
 
 The lab is ready: `main` carries run 1's four slices, its artifacts and the 14 resolved VH
 records; the suite is green (31 tests, 4 files); the tree is clean and the `slice/*` branches are
-deleted. `agentPrefix: "sdlc2:"` — re-probe it, discriminatingly, before spending anything.
+deleted. The `tsconfig.tsbuildinfo` hygiene item is **done** (lab `132bb41`) — `npm run build` no
+longer dirties the tree. `agentPrefix: "sdlc2:"` — **re-probe it, discriminatingly, from the lab
+session, before spending anything.** Not from this repo: a probe here proves the plugin registers,
+not that it registers for the session that will spend the money, and a restart is exactly when it
+broke last time.
 
 The harness is ready too: v0.1.2 is pushed and installed (see Repo states). This run exercises
 fixes that have themselves never executed, which is the same trap as run 1 — expect the second
@@ -19,29 +23,43 @@ round of "an agent quietly did not do what the prompt said", and look for it del
 Run a **2–3 slice feature with a real `Blocked by:` chain** — that is what exercises the branch
 stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, in this order:
 
-> **There is no seed for it yet.** `.sdlc2/features/` holds only `greet-visitor`, so pre-check 3
-> will fire sdlc2's own grilling — the one interactive step, in the main thread, before the graph.
-> Budget for that conversation.
+> **The seed is decided (2026-08-21): a visit's greeting history.** Bring this into the
+> grilling — *"during a visit I want to see the names I've been greeted as, and clear that list
+> when I'm done."* In memory only, so it stays consistent with run 1's `fresh visit starts clean`
+> guard slice rather than having to break it.
 >
-> And the chain cannot be ordered directly: the `po` node writes the issues and decides what
-> `Blocked by:` what. So the *idea* has to genuinely need a chain — something where slice 2 is
-> meaningless without slice 1's code, not two independent behaviours that could ship in either
-> order. Run 1's feature was deliberately four independent slices, which is precisely why the
-> stacking bug hid: every branch happened to contain the last one and nothing was wrong to see.
+> There is still no `.sdlc2/features/` entry for it — the dir holds only `greet-visitor` — so
+> pre-check 3 will fire sdlc2's own grilling. That is the one interactive step, in the main
+> thread, before the graph. Budget for that conversation.
+>
+> The chain cannot be ordered directly: the `po` node writes the issues and decides what
+> `Blocked by:` what. This idea was picked because it *genuinely* needs one — a list cannot be
+> shown before it exists, and cannot be cleared before it is shown. Expect roughly:
+>
+> | slice | likely | `Blocked by:` | base |
+> |---|---|---|---|
+> | 01 | show the history | — | `main` |
+> | 02 | clear the history | 01 | slice 01's branch |
+> | 03 | label / count it | 01 | slice 01's branch |
+>
+> **The prediction that makes this run worth paying for:** 03 is blocked by 01 but *not* by 02,
+> so naive "stack each slice on the previous" — run 1's exact bug — becomes falsifiable for the
+> first time: `git merge-base --is-ancestor <slice-02> <slice-03>` must **fail**. Run 1 could
+> never make that assertion, because with four independent slices every stacking was vacuously
+> consistent with the invariant.
+>
 > If the `po` comes back with no `Blocked by:` line anywhere, the run does not test the fix —
 > say so and reshape the idea rather than proceeding.
 
 
 1. Did the tester actually run the `git merge-base --is-ancestor` assertions? They are the whole
    enforcement; if the tester skips them, the invariant is back to being a wish.
-2. Was the blocked slice cut from its blocker, and the independent one from `main`?
+2. Was each blocked slice cut from **its own blocker**, and the independent one from `main`?
+   With 02 and 03 both blocked by 01, the sharp check is the *negative* one — 02 must **not** be
+   an ancestor of 03. That is the assertion run 1's slice shape could not express.
 3. Did the report node commit the paperwork to `sdlc2/<feature>`, leaving a clean tree?
 4. Do the per-round score histories climb, flatline, or oscillate? Two more runs of that decides
    whether the doc-node makers are under-powered — see `SPEC.md` §12 risk 5.
-
-One lab hygiene item first: `tsconfig.tsbuildinfo` is **tracked** in the lab, and `npm run build`
-rewrites it. That dirties the tree and will either block the clean-tree gate or get swept into a
-slice commit. `git rm --cached tsconfig.tsbuildinfo` and add it to `.gitignore` before running.
 
 ## Where we are
 
@@ -137,15 +155,17 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
   `node verify.mjs` passes **220 checks**.
 - **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
-  0.1.1 to 0.1.2 on 2026-08-21, and the resolved `${CLAUDE_PLUGIN_ROOT}` for 0.1.2 (under the
-  marketplace plugin cache — ask a probe agent for it rather than hardcoding it here, which
-  `[R-PKG-03]` forbids) is byte-identical to this repo for `new-feature.workflow.js`, `modes/`,
-  `skills/` and `VERSION`. Claude Code was restarted to apply
-  it. **Re-probe agent resolution before spending the run** — a restart is exactly when it broke
-  last time.
-- **`~/dev/code/sdlc2-lab`** — lab. `main` at `4169a34`, clean, 6 commits, suite green (31 tests,
-  4 files, ~1.9s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
-  to `main` and can be deleted whenever.
+  0.1.1 to 0.1.2 on 2026-08-21, and the resolved `${CLAUDE_PLUGIN_ROOT}` for 0.1.2 (a
+  **version-numbered dir** under the marketplace plugin cache — resolve it at runtime rather than
+  hardcoding it here, which `[R-PKG-03]` forbids; note 0.1.1 is still cached as a sibling, so the
+  parent dir is not the answer) is byte-identical to this repo for `new-feature.workflow.js`,
+  `modes/`, `skills/`, `agents/` and `VERSION`. Re-verified 2026-08-21 after the restart.
+  **Parity is not resolution** — the files matching says nothing about which persona answers to
+  `sdlc2:sdlc2-po`, so still probe that from the lab session before spending the run.
+- **`~/dev/code/sdlc2-lab`** — lab. `main` at `132bb41`, clean, 7 commits, suite green (31 tests,
+  4 files, ~1.7s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
+  to `main` and can be deleted whenever. `tsconfig.tsbuildinfo` is untracked and gitignored, and
+  `npm run build` was re-run to confirm it leaves the tree clean.
 
 ## What to watch in run 2
 
