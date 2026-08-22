@@ -19,6 +19,19 @@ round of "an agent quietly did not do what the prompt said", and look for it del
 Run a **2–3 slice feature with a real `Blocked by:` chain** — that is what exercises the branch
 stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, in this order:
 
+> **There is no seed for it yet.** `.sdlc2/features/` holds only `greet-visitor`, so pre-check 3
+> will fire sdlc2's own grilling — the one interactive step, in the main thread, before the graph.
+> Budget for that conversation.
+>
+> And the chain cannot be ordered directly: the `po` node writes the issues and decides what
+> `Blocked by:` what. So the *idea* has to genuinely need a chain — something where slice 2 is
+> meaningless without slice 1's code, not two independent behaviours that could ship in either
+> order. Run 1's feature was deliberately four independent slices, which is precisely why the
+> stacking bug hid: every branch happened to contain the last one and nothing was wrong to see.
+> If the `po` comes back with no `Blocked by:` line anywhere, the run does not test the fix —
+> say so and reshape the idea rather than proceeding.
+
+
 1. Did the tester actually run the `git merge-base --is-ancestor` assertions? They are the whole
    enforcement; if the tester skips them, the invariant is back to being a wish.
 2. Was the blocked slice cut from its blocker, and the independent one from `main`?
