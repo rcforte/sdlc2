@@ -15,8 +15,11 @@ sdlc2 is a **graph** of **loops**, packaged as a Claude Code plugin.
   one generic executor walks them. Adding a node is a row here and a row there — never a
   control-flow edit.
 - Each **node** is a loop: a **maker** persona produces artifacts, **adversarial checkers** score
-  them against a rubric, and the maker gets up to **5 rounds** to answer them. If the bar is still
-  unmet, an **arbiter** makes the best available call, documents it, and the graph continues.
+  them against a rubric, and the maker gets a bounded number of rounds to answer them — **2** at
+  the document nodes, **5** at `build`, whose extra attempts only cost anything when a slice
+  actually fails. A loop that stops moving exits early rather than spending the rest. If the bar
+  is still unmet, an **arbiter** makes the best available call, documents it, and the graph
+  continues.
 - Humans appear exactly twice: the **grilling** that produces the seed, and the **merge**.
   Nothing in between pauses.
 
@@ -83,9 +86,12 @@ sdlc2 shares **nothing** at runtime with any other harness.
   checkers · arbiter · rubric · rounds · inputs · outputs · when · next` (+ `fanout` where it
   applies). `kind` is one of `loop` · `fanout` · `report`, and it is what the executor dispatches
   on; a node whose `kind` has no runner is a spec violation.
-- `[R-GRAPH-02]` **MUST**: `architect` and `ux` run concurrently (one `parallel()` barrier);
-  `build` is their join. This follows from the edges, not from a hand-written wave: nodes become
-  ready together and are run together.
+- `[R-GRAPH-02]` **MUST**: `architect` and `ux` run concurrently, and every node starts the moment
+  its predecessors have settled — there is **no wave barrier**. `build` waits for `architect`
+  alone; the join on `ux` is **per slice**, taken inside the build node by a slice the resolver
+  marked `ui: true`. A backend slice therefore starts while `ux` is still running, and `report`
+  waits for both `build` and `ux` so nothing is reported before every node has settled. This
+  follows from the edges plus the per-slice join, never from a hand-written wave.
 - `[R-GRAPH-03]` **MUST**: `ux` runs only when the `po` node reports `hasUiStories: true`, and the
   predicate is evaluated by the executor, never by an agent. `hasUiStories` is a **required**
   field of the `po` maker's schema, so it cannot be silently omitted into a skip.
@@ -106,7 +112,11 @@ sdlc2 shares **nothing** at runtime with any other harness.
 ## 5. The loop
 
 - `[R-LOOP-01]` **MUST**: pass ⇔ every binary checker passes **AND** `step_score ≥ threshold`
-  **AND** no unresolved `critical`/`high` defect. A binary checker states `pass` explicitly — it
+  **AND** no unresolved defect at **veto severity**. Veto severity is `critical`/`high` at `build`,
+  where the tester's authority is executable, and **`critical` only at the document nodes**. A
+  `high` already drags its criterion's score, so vetoing on it there counted it twice — and it
+  counted it through **severity**, which is the one judgement in this system that has no anchors
+  while every score has three. Severity is therefore anchored explicitly in the checker prompt. A binary checker states `pass` explicitly — it
   is a required field of its schema — and a binary checker that passes the work while filing a
   `critical`/`high` defect against it has contradicted itself and is resolved as a **fail**.
 - `[R-LOOP-02]` **MUST**: `step_score = MIN(weighted totals)` across scoring checkers — never a
@@ -160,10 +170,15 @@ sdlc2 shares **nothing** at runtime with any other harness.
   spec violation, because it makes the node table decorative and the conformance check a lie.
   There is no inherited default; a role without a declaration is a spec violation.
 - `[R-MODEL-02]` **MUST**: model **aliases** (`sonnet`, `opus`), never dated ids.
-- Current policy: doc makers `sonnet`/`high`; `architect` and `developer` `opus`; every checker
-  `opus`/`xhigh`; every arbiter `opus`/`max`; mechanical steps `sonnet`/`low` — the `report`
-  node's role declares this like any other, while slice resolution and escalation are inline
-  helper calls inside the build node rather than roles of their own.
+- Current policy: doc makers `sonnet`/`high`; `architect` and `developer` `opus`; the **binary
+  tester** `opus`/`medium` — its authority is a green suite, not deliberation, and effort is cut
+  there rather than the model, because a tester false-green is the one unrecoverable failure in
+  the graph; other checkers `opus`/`xhigh` except the code reviewer at `opus`/`high`; every
+  arbiter `opus`/`high`; mechanical steps `sonnet`/`low`, except slice resolution at
+  `sonnet`/`medium` because that one call decides the entire branch topology and has no checker
+  over it. The `report` node's role declares this like any other, while slice resolution,
+  escalation and worktree release are inline helper calls inside the build node rather than roles
+  of their own.
 
 ## 8. Nodes
 
@@ -184,7 +199,12 @@ tools so this is enforced, not merely requested.
 
 **`build`** — `[R-BUILD-01]` **MUST NOT** record a slice as shipped without a build that actually
 committed **and** a tester verdict of `pass: true`, under any arbiter decision. A green verdict
-from an earlier attempt is not evidence about a later one. `[R-BUILD-02]` **MUST**: on failure
+from an earlier attempt is not evidence about a later one — **and neither is one from before the
+arbiter touched the branch**, so the build arbiter **MUST NOT commit**: it accepts the debt or it
+escalates (`finalized: false`). The shipped `sha` and the sha a tester actually passed are one
+commit. The arbiter used to be told to "commit any fix … and keep the suite green", which is an
+instruction with no executable assertion behind it — the failure class this project has already
+been bitten by twice. `[R-BUILD-02]` **MUST**: on failure
 after 5 attempts, escalate (note on the issue), leave the branch unmerged, skip dependents,
 continue other slices — naming the reason the **last attempt** actually ended in: `no-commit` (the
 developer never reached a green commit, so nothing was tested and there is no branch to review),
@@ -195,9 +215,25 @@ suite. The build node's own verdict is `pass` · `soft-pass` (debt accepted) · 
 slices shipped, some did not) · `hard-fail` (none shipped).
 `[R-BUILD-03]` **MUST**: surviving **code-reviewer** defects go to the arbiter, which may accept
 the debt — each accepted item naming `file:line` and the violated principle in a VH record.
-`[R-BUILD-04]` **MUST**: slices build **sequentially**, one branch `slice/<feature>/<NN>-<slug>`
-each; no worktrees, no lanes, no parallelism in v0.1. An independent slice is cut from the default
-branch. A slice with `Blocked by:` is cut from its **blocker's branch** instead, because it needs
+`[R-BUILD-04]` **MUST**: slices are scheduled by **dependency level**, one branch
+`slice/<feature>/<NN>-<slug>` each. Levels are computed to a fixpoint from `Blocked by:`, never
+assumed from the order the slices arrive in. Slices within a level are independent of one another
+and **MAY** build concurrently, in lanes, each in its **own git worktree** under
+`.sdlc2/worktrees/<feature>/<id>` — never under the feature directory, which the report node
+commits.
+
+Lanes open **only** when the project declares `commands.install`. A fresh worktree is a fresh
+tree: it has no installed dependencies, so the test command cannot run in it, and a slice would
+fail for a reason that has nothing to do with its code. Without that command the engine builds
+sequentially in the session's own checkout and **MUST** say so in the log rather than degrading
+silently. Worktrees **MUST** be released when building ends — left behind they fail the next run's
+clean-tree pre-check, and the branch each one holds cannot be checked out anywhere else. Releasing
+a worktree **MUST NOT** delete its branch: the branches are the deliverable.
+
+The target repo **MUST** ignore `.sdlc2/worktrees/`, and any agent-worktree path its harness uses.
+This is a **target-repo** obligation, not a harness one — see `SETUP.md`.
+
+An independent slice is cut from the default branch. A slice with `Blocked by:` is cut from its **blocker's branch** instead, because it needs
 the blocker's *code*, not just its issue file — and the code reviewer diffs against that same base,
 so a stacked slice's review shows only what the slice itself changed. Where a slice declares
 several blockers, the base is the last of them in dependency order; the rest are asserted as
@@ -210,9 +246,13 @@ first real run the developer stacked all four independent slices anyway, and the
 diff containing three earlier slices' code at 0.86 without noticing.
 `[R-BUILD-05]` **MUST**: the developer drives sdlc2's own `skills/outside-in-tdd`.
 `[R-BUILD-06]` **MUST NOT**: move, merge into, rebase onto, or push the default branch. sdlc2
-never merges. `[R-BUILD-07]` **MUST**: the tester and the code-reviewer inspect the **same working
-tree concurrently**, so both are read-only on git — the developer leaves `HEAD` on the slice
-branch, the tester asserts it rather than switching to it, and the reviewer reads the diff without
+never merges. `[R-BUILD-07]` **MUST**: the developer, the tester and the code-reviewer of one
+slice inspect the **same working tree** — the session's checkout on the sequential path, or that
+slice's own worktree in a lane, addressed with `git -C <path>` by all three. This is a **per-slice**
+invariant, which is what allows sibling slices to run at once; it is **not** satisfied by giving
+each agent its own tree. The tester and reviewer read that tree concurrently, so both are read-only
+on git — the developer leaves `HEAD` on the slice branch, the tester asserts it rather than
+switching to it, and the reviewer reads the diff without
 checking anything out.
 
 ## 9. `VERIFY-WITH-HUMAN.md`
@@ -222,10 +262,14 @@ checking anything out.
 - `[R-VH-01]` **MUST**: every arbiter decision produces one index row and one Decision Record
   (Issue · Options · Decision · Rationale · Risk if wrong · What would change my mind ·
   unresolved defects).
-- `[R-VH-02]` **MUST**: ids are `VH-NN`, monotonic per feature, never reused or renumbered. The
-  ids are assigned by the arbiter after reading the file, which is only safe because arbitration
-  is **serialized by the executor** (`R-LOOP-07`); two arbiters running at once would read the
-  same highest id and one append would be lost.
+- `[R-VH-02]` **MUST**: ids are **namespaced per arbiter** — `VH-<node>-NN` for a document node,
+  `VH-build-<slice>-NN` for a slice — monotonic **within that prefix**, never reused or
+  renumbered. Each arbiter reads the file, finds the highest id carrying **its own** prefix, and
+  continues from there, so two arbiters appending at the same moment cannot collide.
+  Arbitration is consequently **no longer serialized**: it runs inside the node that needed it.
+  It was serialized before precisely because a single flat `VH-NN` sequence had to be discovered
+  by reading the file, which made the architect's arbiter idle until `ux` finished and put the two
+  most expensive calls in the run back to back.
 - `[R-VH-03]` **MUST NOT**: rewrite or delete a row; a superseded decision gets a new row.
 - `[R-VH-04]` **MUST**: the file exists only once a record exists — its absence means no
   soft-passes.
@@ -264,13 +308,13 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-CFG-02 | `assertArgs()` | the engine throws when `commands.test` is empty, and runs when it is not | ✅ |
 | R-CFG-04 | `configFor()`, `conventions()` | longest **path-segment** prefix wins; `frontend` does not claim `frontend-legacy/`; doc-node prompts list the overrides | ✅ |
 | R-GRAPH-01 | `NODES` literal | every node has all 13 fields and a `kind` the executor dispatches | ✅ |
-| R-GRAPH-02 | `next` edges | `architect` and `ux` share one predecessor; `build`'s predecessors are exactly those two | ✅ |
+| R-GRAPH-02 | `next` edges, `runSlice` | `architect` and `ux` share one predecessor; `build`'s predecessor is `architect` alone; `report` waits for both `build` and `ux`; a `ui` slice awaits `whenSettled('ux')` | ✅ |
 | R-GRAPH-03 | `NODES.ux.when` | true/false both exercised; a walk probe proves no `ux` agent spawns when the gate is closed | ✅ |
 | R-GRAPH-04 | `walk()`, `blocksSuccessors()` | walk probes: `po` hard-fail skips everything downstream; a gate-skip does not | ✅ |
 | R-GRAPH-05 | `next` edges | every edge increases graph depth | ✅ |
 | R-GRAPH-06 | `walk()` | read it: the executor names no node — but adding a node is still only proven by adding one | 👁 |
 | R-GRAPH-07 | `walk()` | a walk probe crashes a node and asserts a `hard-fail` row plus a written report | ✅ |
-| R-LOOP-01 | `runLoop`, `buildSlices` | a probe returns `pass: true` with a critical defect and asserts RED | ✅ |
+| R-LOOP-01 | `runLoop`, `buildSlices`, `blockingOpen` | a probe returns `pass: true` with a critical defect and asserts RED; another asserts a doc node passes on a `high` but never on a `critical`, while `build` still blocks on both | ✅ |
 | R-LOOP-02 | `Math.min.apply` | no `reduce`/average anywhere in scoring | ✅ |
 | R-LOOP-03 | `checkerPrompt`, `runLoop` | prompt greps + positional verdict matching | ✅ |
 | R-LOOP-04 | `weightedTotal()`, `VERDICT` | totals derive from rubric weights; a missing criterion is 0; `criteria` is required | ✅ |
@@ -291,12 +335,12 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-BUILD-01 | `buildSlices()` | probes: a red suite consults no arbiter and ships nothing; a stale green from an earlier attempt ships nothing | ✅ |
 | R-BUILD-02 | `escalationPrompt()`, `buildSlices` | `no-commit` / `tester-red` / `tester-silent` / `unjudgeable` are distinguished in the note and the row | ✅ |
 | R-BUILD-03 | `NODES.build.checkers` | the reviewer is `arbitrable: true` | ✅ |
-| R-BUILD-04 | `buildSlices()`, `baseFor()` | a plain `for` over slices; no `parallel()` over slices; a blocked slice's base is its blocker's branch, and the reviewer diffs against that base | ✅ |
+| R-BUILD-04 | `buildSlices()`, `runSlice()`, `baseFor()` | one callable unit per slice; dependency-level scheduling; lanes only with a declared install command; a blocked slice's base is its blocker's branch and the reviewer diffs against that base; a probe asserts a lane slice gets its own worktree and that the worktrees are released | ✅ |
 | R-BUILD-04a | `testerPrompt()` | the tester prompt carries `git merge-base --is-ancestor` assertions for the base, the blockers and the non-blockers | ✅ |
 | R-BUILD-05/07 | developer/tester/reviewer prompts | read them | 👁 |
 | R-BUILD-06 | whole engine | greps for a merge into the base branch | ✅ |
 | R-VH-01/03/04/05 | arbiter prompts | read them: append-only, read-then-append, VH is an input everywhere | 👁 |
-| R-VH-02 | `arbitrate()` called from `walk()` | a probe asserts the loop never arbitrates, so ids cannot race | ✅ |
+| R-VH-02 | `arbiterPrompt`, `buildArbiterPrompt` | ids are namespaced per arbiter (`VH-<node>-NN`, `VH-build-<slice>-NN`), so concurrent arbiters cannot collide; the loop still never arbitrates itself | ✅ |
 | R-REP-01/02 | the report prompt, `walk()` | a probe asserts the report node runs after an aborted graph; its wording is read | ✅ 👁 |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
@@ -345,18 +389,32 @@ It cannot prove the graph produces good software — the first real run is that 
    probes should discriminate like this; a probe that only proves *a* name resolves cannot tell
    the two apart.
 3. **No executable oracle above `build`.** `po`, `architect` and `ux` are LLM judging LLM. MIN +
-   severity veto + fresh context reduce rubber-stamping; they do not eliminate it.
-4. **Cost.** Worst case ≈ (5 maker + 5 checker) × 3 doc nodes + (5 dev + 5 tester + 5 reviewer) ×
-   N slices, checkers at `opus`/`xhigh`. The executor now stops taking **any** new node — doc
-   nodes included — under ~60k remaining budget, and records the skip; it does not stop a node
-   already in flight, so the ceiling can still be overrun by one node's worth of work.
-5. **Sonnet makers vs opus checkers.** **Measured on run 1:** all three doc nodes used all 5
-   rounds — `po` 0.84 and `architect` 0.77 both went to an arbiter, `ux` reached 0.82 unaided. One
-   run is not enough to tell an under-powered maker from an adversarial panel doing its job, and
-   the two want opposite fixes (a stronger maker vs. a calmer rubric), so the models are unchanged
-   and the report now prints the **per-round score history** instead. A history that climbs is
-   convergence that ran out of rounds; one that flatlines or oscillates is thrash. Decide with the
-   second and third runs, not the first.
+   severity veto + fresh context reduce rubber-stamping; they do not eliminate it. v0.1.3 gives the
+   checker last round's scores (`[E-05]`), which trades a little independence across rounds for
+   stability — mutual blindness *within* a round is untouched (`[R-LOOP-03]`). And a document
+   arbiter still finalizes artifacts that nothing re-checks: the `build` arbiter was stopped from
+   committing (`[R-BUILD-01]`), but above `build` there is no oracle to re-run, so that residual
+   stands and is the human's to catch at merge.
+4. **Cost.** Worst case ≈ (2 maker + 2 checker) × 3 doc nodes + (5 dev + 5 tester + 5 reviewer) ×
+   N slices. The document nodes dropped from 5 rounds to 2 in v0.1.3, the plateau exit can end one
+   sooner, and arbiters came down from `opus`/`max` to `opus`/`high`. The executor stops taking
+   **any** new node — doc nodes included — under ~60k remaining budget, and records the skip; it
+   does not stop a node already in flight, so the ceiling can still be overrun by one node's worth
+   of work.
+5. **Why the doc nodes never converged — and what is still unmeasured.** **Measured on run 1:**
+   all three doc nodes used all 5 rounds — `po` 0.84 and `architect` 0.77 both went to an arbiter,
+   `ux` reached 0.82 unaided. This risk used to be titled *"sonnet makers vs opus checkers"*, which
+   the data does not support: the **`architect` maker is `opus`** and scored **worst**, while both
+   `sonnet` makers scored higher. v0.1.3 therefore left maker models alone and changed the things
+   the evidence did point at — the bar (0.85 → 0.80), the double-counted `high` veto, the
+   default-to-FAIL tie-break on scoring checkers, and two mechanical faults that made rounds carry
+   no signal (`[E-02]`, `[E-05]`).
+
+   **Still unmeasured, and the thing to read run 2 for:** whether the veto ever binds *on its own*.
+   Run 1 predates the per-round history, so rounds 1–4 are invisible; in the three rounds we can
+   see, the **score** term is what failed. The history is now recorded per round, so any round with
+   `score ≥ bar` and no pass is a veto round. If those turn out to be common, the severity
+   anchoring in `[R-LOOP-01]` is the lever; if they are absent, the bar was the whole story.
 6. **The run is scoped to the session's cwd, and nothing enforces that it is the repo you meant.**
    There is no `repoRoot` argument: `featureDir` is relative and the developer's git instructions
    are bare `git checkout -b` / `git commit`, so subagents build wherever the session is rooted.
@@ -376,10 +434,19 @@ truth the code comment points at; drift between the two is a conformance failure
 is a bug — say which before changing either.
 
 Every criterion is scored 0..1 against stated anchors (`0.0` / `0.5` / `1.0`), weights within one
-rubric sum to `1.00`, and the pass bar is *weighted total ≥ threshold* **and** no unresolved
-`critical`/`high` defect.
+rubric sum to `1.00`, and the pass bar is *weighted total ≥ threshold* **and** no unresolved defect
+at veto severity — `critical`/`high` at `build`, `critical` only at the document nodes
+(`[R-LOOP-01]`).
 
-**`po` — threshold 0.85**
+The document thresholds are **0.80**, not 0.85. Measured over all 32 half-credit combinations of a
+five-criterion rubric, a 0.85 bar admits 9 of them and a 0.80 bar 12; neither changes the shape
+(at most two half-credits, and only the lightest two). What decided it was the observed scores
+rather than the distribution: run 1's `po` reached **0.84** and paid an arbiter for the missing
+0.01, while the only unaided pass in the entire run happened at the 0.80 bar. MIN across checkers,
+a refutation mandate, and anchors written as absolutes together put 0.85 inside judge noise for
+work that is genuinely good.
+
+**`po` — threshold 0.80**
 
 | id | weight | judges |
 |---|---|---|
@@ -389,7 +456,7 @@ rubric sum to `1.00`, and the pass bar is *weighted total ≥ threshold* **and**
 | PO-LANG | 0.15 | the seed's ubiquitous language, no invented synonyms |
 | PO-MOCK | 0.15 | `mockup.html` bijective with the stories' happy paths, self-contained |
 
-**`arch` — threshold 0.85**
+**`arch` — threshold 0.80**
 
 | id | weight | judges |
 |---|---|---|

@@ -1,2 +1,6 @@
 .DS_Store
 *.log
+
+# Agent worktrees are created inside the repo — see SETUP.md.
+.claude/worktrees/
+.sdlc2/worktrees/

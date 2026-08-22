@@ -24,6 +24,12 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    itself on the next call. If you are not rooted at the repo you mean to build in, **stop** and
    say it must be relaunched there.
 
+   Then: **worktree hygiene.** If the repo does not **ignore** `.sdlc2/worktrees/` — and whatever
+   path this harness puts its own agent worktrees in, commonly `.claude/worktrees/` — say so and
+   offer to add both to `.gitignore` before continuing. A worktree is created inside the
+   repository, so an un-ignored one shows up as untracked: it fails the clean-tree check below on
+   the next run, and can be swept into a slice commit on this one.
+
    Then: the repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
    the run (slices commit; stray changes would be swept into them). Resolve the default branch:
 
@@ -68,10 +74,11 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    <!-- sdlc2:config -->
    ```yaml
    commands:
-     test:  "./mvnw -q test"      # MANDATORY — the tester's executable ground truth
-     build: ""                     # optional; omit what the stack lacks
-     run:   ""
-     e2e:   ""
+     test:    "./mvnw -q test"    # MANDATORY — the tester's executable ground truth
+     build:   ""                   # optional; omit what the stack lacks
+     install: ""                   # optional; UNLOCKS PARALLEL SLICE LANES — see below
+     run:     ""
+     e2e:     ""
    seam:
      backend:  "REST via MockMvc (@SpringBootTest)"
      frontend: ""                  # empty until a frontend exists
@@ -86,6 +93,12 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    - **`commands.test` empty or absent** → stop. Without it the `tester` has no oracle and the
      whole build gate is theatre. The engine refuses on the same condition, so a run that
      somehow gets past you fails immediately rather than half-way through.
+   - **`commands.install`** is what opens parallel slice lanes. Independent slices build
+     concurrently, each in its own git worktree, and a fresh worktree has **no installed
+     dependencies** — so without this command the suite cannot run there and the engine stays
+     sequential (it logs that it did, and why). Give it the command that makes a freshly-checked-out
+     tree testable: `npm ci`, `./mvnw -q dependency:go-offline`, `uv sync`, and so on. Leave it
+     empty if you would rather keep slices sequential.
    - **Malformed YAML** → stop and show the block; do not guess.
    - A `CLAUDE.md` **nested** in a subdirectory overrides the root block for slices whose files
      live under that directory. Record the map of `dir → config` and pass it along.
@@ -149,6 +162,9 @@ order:
    committed but the suite never went green), `tester-silent` (the tester never answered — the
    slice is *unverified*, not proven broken) and `unjudgeable` (a checker could not judge it).
 3. **Human-verify** — the count and one-line summary of each new `VH-NN` row.
+3b. **Lanes** — if the report says slices built concurrently, say which ran together and that each
+   had its own worktree. If it says they built sequentially because no `commands.install` is
+   declared, pass that on: it is a one-line config change that shortens every future run.
 4. **Next action** — review the `slice/<feature>/…` branches and
    `.sdlc2/features/<slug>/VERIFY-WITH-HUMAN.md`, then merge yourself. State that sdlc2 has not
    merged and will not. Note which slices were **stacked**: a slice with `Blocked by:` is cut from

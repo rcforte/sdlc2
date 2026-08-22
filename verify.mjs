@@ -305,7 +305,10 @@ if (M) {
     check(roles.every((r) => names.size === 0 || names.has(r.agent)), `node ${id}: every role names a bundled persona  [R-IND-02]`)
     check(n.arbiter.agent === n.maker.agent, `node ${id}: arbiter is the maker's persona  [R-LOOP-07]`)
     check(M.RUBRICS[n.rubric] !== undefined, `node ${id}: rubric '${n.rubric}' exists`)
-    check(n.rounds === 5, `node ${id}: 5 rounds`)
+    // [E-01] Document nodes get 2 rounds, `build` keeps 5. Asserted per KIND rather than as one
+    // number, so a doc node silently returning to 5 — or build being cut to 2 — is a failure.
+    const want = n.kind === 'fanout' ? 5 : 2
+    check(n.rounds === want, `node ${id}: ${want} rounds  [E-01]`)
   }
   check(M.NODES.build.checkers.some((c) => c.binary && c.arbitrable === false), 'build: the tester is binary and NOT arbitrable  [R-BUILD-01]')
   check(M.NODES.build.checkers.some((c) => c.arbitrable === true), 'build: the code reviewer IS arbitrable  [R-BUILD-03]')
@@ -317,7 +320,13 @@ if (M) {
   check(edges.every(([, t]) => t in M.NODES), `every 'next' names a real node  [R-GRAPH-01]`)
   const preds = M.predecessorsOf()
   check(preds.architect.join() === 'po' && preds.ux.join() === 'po', 'architect and ux both hang off po — one wave, run concurrently  [R-GRAPH-02]')
-  check(preds.build.sort().join() === 'architect,ux', 'build is the join of architect and ux  [R-GRAPH-02]')
+  // [E-12] `build` no longer joins on BOTH design nodes. A backend slice consumes nothing from
+  // the UX output and used to wait for it regardless. The join moved INTO the build node, per
+  // slice — so what must hold here is: build waits for architect, ux is still reached, and
+  // `report` waits for everything so nothing is reported before every node has settled.
+  check(preds.build.join() === 'architect', 'build waits for architect alone — the ux join is per slice  [R-GRAPH-02]')
+  check(preds.report.sort().join() === 'build,ux', 'report still waits for BOTH build and ux  [R-GRAPH-02]')
+  check(/slice\.ui === true/.test(src) && /whenSettled\('ux'\)/.test(src), 'a UI slice waits for the ux node before it is built  [R-GRAPH-02]')
   check(nodes.filter(([, n]) => n.kind === 'report').length === 1, 'exactly one terminal report node')
   // no back-edges: `next` must always point at a node further from the root  [R-GRAPH-05]
   const depth = { po: 0, architect: 1, ux: 1, build: 2, report: 3 }
@@ -365,14 +374,20 @@ if (M) {
   check(p3.includes('ROUND 3'), 'makerPrompt: round number is passed through')
   check(!/transcript|previous round said|earlier you wrote/i.test(p3), 'makerPrompt: carries no prior-round transcript  [R-CTX-03]')
   check(M.makerPrompt(M.NODES.po, 1, []) === p1, 'makerPrompt: pure — same inputs, same output  [R-CTX-05]')
-  check(M.makerPrompt.length <= 4 && M.checkerPrompt.length <= 3, 'prompt builders take only (node, round, defects)-shaped input  [R-CTX-05]')
+  check(M.makerPrompt.length <= 4 && M.checkerPrompt.length <= 4, 'prompt builders take only (node, round, defects, scores)-shaped input  [R-CTX-05]')
   const paths = M.makerPrompt(M.NODES.architect, 1, []).match(/^  - \S+$/gm) || []
   check(new Set(paths).size === paths.length, 'makerPrompt: each path is listed once  [R-CTX-02]')
   const harnessBrief = M.makerPrompt(M.NODES.po, 2, [{ criterion: 'engine', severity: 'critical', location: 'sdlc2-product-owner-critic', evidence: 'the critic returned no verdict', fix: 're-run the checker', harness: true }])
   check(!/Fix EVERY defect/.test(harnessBrief) && /harness failure/.test(harnessBrief), 'makerPrompt: a maker is never asked to repair a checker that failed to answer  [R-LOOP-08]')
   check(!/first attempt/.test(harnessBrief) && /ROUND 2/.test(harnessBrief), 'makerPrompt: and the round still counts — a harness failure is not a fresh start  [R-LOOP-08]')
   const cp = M.checkerPrompt(M.NODES.po, M.NODES.po.checkers[0], 2)
-  check(/REFUTE/.test(cp) && /Default to FAIL/i.test(cp), 'checkerPrompt: adversarial mandate, default-to-fail')
+  // [E-03] The refutation mandate stays everywhere; the default-to-FAIL tie-break is now the
+  // BINARY checker's alone. A global find/replace that disarmed the tester would fail here.
+  const tp = M.checkerPrompt(M.NODES.build, M.NODES.build.checkers.filter((c) => c.binary)[0], 1)
+  check(/REFUTE/.test(cp), 'checkerPrompt: adversarial mandate  [R-LOOP-03]')
+  check(!/Default to FAIL/i.test(cp), 'checkerPrompt: a SCORING checker no longer defaults to FAIL  [E-03]')
+  check(/do not penalise the maker for what you did not check/i.test(cp), 'checkerPrompt: scoring checker is told not to guess downward  [E-03]')
+  check(/Default to FAIL/i.test(tp), 'checkerPrompt: the BINARY checker still fails closed  [E-03]')
   check(/READ-ONLY/i.test(cp) && /not seen any other checker/i.test(cp), 'checkerPrompt: read-only and blind to other checkers  [R-LOOP-03]')
   check(/do not compute a total|Do NOT compute a total/i.test(cp), 'checkerPrompt: engine computes the total  [R-LOOP-04]')
   check(/missing id is scored ZERO|scored ZERO by the engine/i.test(cp), 'checkerPrompt: says an unscored criterion is a zero')
@@ -389,8 +404,18 @@ group('workflow sandbox rules')
 check(!/Date\.now\(|Math\.random\(|new Date\(\)/.test(src), 'no Date.now / Math.random / new Date() — they throw in a workflow script')
 check(!/require\(|from ['"]node:/.test(src), 'no filesystem or node imports')
 check(/Math\.min\.apply/.test(src) && !/scored\.reduce/.test(src), 'step score is a MIN, never an average  [R-LOOP-02]')
-check(/for \(const slice of slices\)/.test(src), 'build node iterates slices sequentially  [R-BUILD-04]')
-check(!/parallel\(\s*slices/.test(src), 'build node never parallelizes slices  [R-BUILD-04]')
+// [E-07] These two checks used to assert a flat `for` over slices. That invariant is GONE by
+// design; they are rewritten, not deleted, because they are the only executable guard on how the
+// build node schedules work. What must now hold: one callable unit per slice, dependency-LEVEL
+// scheduling, concurrency only where a fresh tree can actually be tested, and a private worktree
+// for anything running beside a sibling.
+check(/async function runSlice\(slice, wt\)/.test(src), 'one slice is built by one callable unit  [R-BUILD-04]')
+check(/levelOf\[sl\.id\] = lv/.test(src), 'slices are scheduled by dependency LEVEL, not in a flat line  [R-BUILD-04]')
+check(/const LANES = install \? 4 : 1/.test(src), 'lanes open only when the project declares an install command  [R-BUILD-04]')
+check(/await parallel\(batch\.map/.test(src), 'independent slices within a level run concurrently  [R-BUILD-04]')
+check(src.includes('git worktree add ${wt}'), 'a concurrently-built slice gets its OWN worktree  [R-BUILD-07]')
+check(src.includes('git worktree remove --force'), 'and the worktrees are released when building ends  [R-BUILD-07]')
+check(!/WORKTREES = `\$\{DIR\}/.test(src), 'worktrees live OUTSIDE the feature dir the report node commits  [R-REP-03]')
 check(/agentPrefix/.test(src) && /function at\(/.test(src), 'agent types are resolved through a host-configurable prefix')
 // `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the
 // engine said, which is the opposite of merging. Exclude it by name rather than loosening the grep.
@@ -464,7 +489,7 @@ await probe('arbitration', async () => {
     },
   })
   const r = await E.runLoop(E.NODES.po)
-  check(r.verdict === 'needs-arbitration' && r.rounds === 5, 'the loop itself never arbitrates — it hands the decision up  [R-VH-02]')
+  check(r.verdict === 'needs-arbitration' && r.rounds === 2, 'the loop itself never arbitrates — it hands the decision up  [R-VH-02]')
   check(arbiters === 0, 'no arbiter ran inside the loop, so two concurrent nodes cannot race on VERIFY-WITH-HUMAN.md  [R-VH-02/03]')
   const decided = await E.arbitrate(E.NODES.po, r)
   check(arbiters === 1, 'the executor makes exactly one arbiter call  [R-LOOP-07]')
@@ -562,7 +587,7 @@ await probe('maker never delivers', async () => {
     },
   })
   const r = await E.runLoop(E.NODES.po)
-  check(r.verdict === 'hard-fail' && r.rounds === 5, `a maker that never produced its artifacts hard-fails (got '${r.verdict}')`)
+  check(r.verdict === 'hard-fail' && r.rounds === 2, `a maker that never produced its artifacts hard-fails (got '${r.verdict}')`)
   check(arbiters === 0, 'and nothing is arbitrated over an artifact that does not exist')
 })
 
@@ -685,12 +710,169 @@ await probe('slice branch bases', async () => {
   check(/git diff slice\/demo\/01-a\.\.\./.test(of('review', '02-b')), "the reviewer diffs a stacked slice against its blocker, so the blocker's code is not replayed as this slice's work  [R-BUILD-04]")
   check(/git diff main\.\.\./.test(of('review', '03-c')), 'and an independent slice is still diffed against the default branch  [R-BUILD-04]')
   check(/merge-base --is-ancestor main HEAD/.test(of('test', '01-a')), 'the tester is told to PROVE the base with real git plumbing  [R-BUILD-04a]')
+  // [E-07] Level scheduling changed the ORDER: 01-a and 03-c are both independent (level 0), so
+  // 03-c now ships before 02-b, which is blocked by 01-a (level 1). The must-not-contain list is
+  // built from what has actually shipped, so the assertions move with the order — but every pair
+  // is still covered exactly once, which is what the invariant needs.
   const t3 = of('test', '03-c')
-  check(/MUST NOT be an ancestor/.test(t3) && /slice\/demo\/01-a/.test(t3) && /slice\/demo\/02-b/.test(t3),
-    'and to prove the independent slice carries NEITHER of the branches before it  [R-BUILD-04a]')
-  check(!/MUST NOT be an ancestor[\s\S]*slice\/demo\/01-a/.test(of('test', '02-b')), "a blocker is never in its dependent's must-not-contain list  [R-BUILD-04a]")
+  check(/MUST NOT be an ancestor/.test(t3) && /slice\/demo\/01-a/.test(t3),
+    'an independent slice must not carry its independent sibling  [R-BUILD-04a]')
+  const t2 = of('test', '02-b')
+  check(/MUST NOT be an ancestor/.test(t2) && /slice\/demo\/03-c/.test(t2),
+    'and a blocked slice must not carry the independent slice that shipped beside it  [R-BUILD-04a]')
+  check(!/MUST NOT be an ancestor[\s\S]*slice\/demo\/01-a/.test(t2), "a blocker is never in its dependent's must-not-contain list  [R-BUILD-04a]")
   const row = r.slices.rows.find((x) => x.id === '02-b')
   check(row && row.base === 'slice/demo/01-a', 'the report row records what each slice was cut from  [R-REP-02]')
+})
+
+
+// ── P15..P19 — the v0.1.3 enhancements, each driven through the path it changed ────────────────
+// Every fix in sdlc2-enhance-1.md was an UNEXECUTED fix when it was written. These probes are the
+// difference between "the code says it does this" and "it does this", which is the only
+// distinction this project has ever found a real defect with.
+
+// P15 — [E-02] the repair brief. A round that fails on SCORE alone used to fall through to the
+// "first attempt" branch and tell a round-3 maker it had never seen the work.
+await probe('E-02 repair brief carries the scores', async () => {
+  const M2 = engine()
+  const withScores = M2.makerPrompt(M2.NODES.po, 3, [], '  PO-AC: 0.5 — happy path only')
+  check(!/first attempt/.test(withScores), 'a later round is never told it is the first attempt  [E-02]')
+  check(/scored BELOW THE BAR but cited no/.test(withScores), 'a score-only failure gets its own brief, not silence  [E-02]')
+  check(/PO-AC: 0\.5/.test(withScores), "and the maker is shown which criterion cost it the round  [E-02]")
+  const first = M2.makerPrompt(M2.NODES.po, 1, [], '')
+  check(/first attempt/.test(first), 'but a genuine round 1 still says first attempt  [E-02]')
+
+  // and the loop actually threads them: a checker that scores low with no defects must still
+  // produce a round-2 prompt carrying round-1's numbers.
+  const seen = []
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (isMake(o)) { seen.push(p); return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: true } }
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: false, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 0.5, why: `thin ${c.id}` })), defects: [] }
+    },
+  })
+  await E.runLoop(E.NODES.po)
+  check(seen.length === 2, `the loop ran both rounds (got ${seen.length})`)
+  check(/HOW THE LAST ROUND SCORED YOU/.test(seen[1] || ''), "round 2's maker receives round 1's per-criterion scores  [E-02]")
+  check(/thin PO-AC/.test(seen[1] || ''), 'including the checker’s reason  [E-02]')
+  check(!/HOW THE LAST ROUND SCORED YOU/.test(seen[0] || ''), 'and round 1 receives none — there is nothing to carry  [E-02]')
+})
+
+// P16 — [E-05] the checker gets last round's verdict from round 2, and only from round 2.
+await probe('E-05 checker memory across rounds', async () => {
+  const M2 = engine()
+  const r1 = M2.checkerPrompt(M2.NODES.po, M2.NODES.po.checkers[0], 1, '')
+  const r2 = M2.checkerPrompt(M2.NODES.po, M2.NODES.po.checkers[0], 2, '  PO-AC: 0.5 — thin')
+  check(!/HOW THE PREVIOUS ROUND SCORED/.test(r1), 'round 1 has no previous round to anchor to  [E-05]')
+  check(/HOW THE PREVIOUS ROUND SCORED/.test(r2) && /PO-AC: 0\.5/.test(r2), 'round 2 sees how round 1 scored  [E-05]')
+  check(/Do NOT lower\n?.*without quoting the regression|without quoting the regression/s.test(r2), 'and may not silently lower a score  [E-05]')
+  check(/not seen any other checker/i.test(r2), 'while staying blind to its PEERS — only its own past verdict  [R-LOOP-03]')
+})
+
+// P17 — [E-10] severity anchors exist, and the doc-node veto is `critical`-only while build keeps
+// critical+high. Without the second assertion, narrowing the veto is indistinguishable from
+// deleting it.
+await probe('E-10 severity anchoring and veto scope', async () => {
+  const M2 = engine()
+  const cp = M2.checkerPrompt(M2.NODES.po, M2.NODES.po.checkers[0], 1, '')
+  check(/SEVERITY, anchored/.test(cp), 'checkerPrompt defines the severity levels  [E-10]')
+  check(/Wording and taste are never high/.test(cp), 'and says plainly what is NOT high  [E-10]')
+  const hi = [{ criterion: 'PO-AC', severity: 'high', evidence: 'e', fix: 'f' }]
+  const crit = [{ criterion: 'PO-AC', severity: 'critical', evidence: 'e', fix: 'f' }]
+  check(M2.blockingOpen(hi).length === 1, 'default scope still blocks on high — build is unchanged  [R-LOOP-01]')
+  check(M2.blockingOpen(hi, true).length === 0, 'a doc node does not veto on high  [E-10]')
+  check(M2.blockingOpen(crit, true).length === 1, 'but a doc node DOES still veto on critical  [E-10]')
+
+  // end to end: a checker at bar with one `high` now PASSES a doc node, in one round.
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      if (isMake(o)) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: true }
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [{ criterion: 'PO-AC', severity: 'high', location: 'x', evidence: 'quoted', fix: 'f' }] }
+    },
+  })
+  const r = await E.runLoop(E.NODES.po)
+  check(r.verdict === 'pass' && r.rounds === 1, `a clean score with one high defect passes in round 1 (got '${r.verdict}' in ${r.rounds})  [E-10]`)
+})
+
+// P18 — [E-01] the plateau exit stops a node that is not converging, and still hands off exactly
+// one arbitration rather than returning a pass.
+await probe('E-01 plateau exit', async () => {
+  let makes = 0
+  const E = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      if (isMake(o)) { makes++; return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/design.md' }], hasUiStories: true } }
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: false, criteria: E.RUBRICS.arch.criteria.map((c) => ({ id: c.id, score: 0.5 })), defects: [{ criterion: 'AR-BOUND', severity: 'critical', location: 'x', evidence: 'q', fix: 'f' }] }
+    },
+  })
+  // Give the node more rounds than the plateau needs, so the BREAK is what ends it, not the cap.
+  const node = Object.assign({}, E.NODES.architect, { rounds: 9 })
+  const r = await E.runLoop(node)
+  check(r.verdict === 'needs-arbitration', `a flat node hands off rather than passing (got '${r.verdict}')  [E-01]`)
+  check(r.rounds === 3 && makes === 3, `and stops at round 3 instead of burning 9 (rounds=${r.rounds}, makers=${makes})  [E-01]`)
+  check(r.history.length === 3, 'the score history records every round it did spend  [R-LOOP-09]')
+})
+
+// P19 — [E-04] the build arbiter never commits, and a slice ships the sha the TESTER verified.
+// Also [E-07]: with an install command declared, independent slices build in parallel worktrees.
+await probe('E-04 arbiter cannot commit · E-07 lanes', async () => {
+  const said = []
+  const E = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test', install: 'npm ci' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      const L = o.label || ''
+      said.push({ label: L, prompt: p })
+      if (L.startsWith('slices:resolve')) return { slices: [
+        { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: false },
+        { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: [], ui: false },
+      ] }
+      if (L.startsWith('build:')) return { committed: true, sha: 'verified-sha', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
+      if (L.startsWith('test:')) return { pass: true, defects: [] }
+      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
+      if (L.startsWith('arbiter:')) return { finalized: true, records: [{ id: 'VH-build-01-a-01', decision: 'd', rationale: 'r' }] }
+      return {}
+    },
+  })
+  const r = await E.buildSlices(E.NODES.build)
+  const arb = (said.find((x) => x.label.startsWith('arbiter:')) || {}).prompt || ''
+  check(/Do NOT edit code and do NOT commit/.test(arb), 'the build arbiter is forbidden from committing  [E-04]')
+  check(!/commit any fix/.test(arb), 'and is not invited to "commit any fix" any more  [E-04]')
+  check(/finalized/.test(arb) && /escalated to a\n?\s*human/.test(arb), 'it may refuse the debt instead  [E-04]')
+  check(r.slices.shipped.every((x) => x.sha === 'verified-sha'), 'a shipped slice carries the sha the tester verified  [E-04]')
+
+  const dev = (said.find((x) => x.label.startsWith('build:01-a')) || {}).prompt || ''
+  check(/git worktree add/.test(dev), 'with lanes open, a slice builds in its own worktree  [E-07]')
+  check(/npm ci/.test(dev), 'and installs dependencies there before testing  [E-07]')
+  const tst = (said.find((x) => x.label.startsWith('test:01-a')) || {}).prompt || ''
+  check(/git -C \.sdlc2\/worktrees\/demo\/01-a/.test(tst), 'and the tester judges THAT tree, not the session checkout  [R-BUILD-07]')
+  check(said.some((x) => x.label === 'worktrees:release'), 'the worktrees are released when building ends  [E-07]')
+})
+
+// P20 — [E-04 mirror] an arbiter that REFUSES the debt escalates instead of shipping.
+await probe('E-04 arbiter refusal', async () => {
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'p', title: 'A', dir: '', blockedBy: [], ui: false }] }
+      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: 'slice/demo/01-a', changelog: 'x' }
+      if (L.startsWith('test:')) return { pass: true, defects: [] }
+      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
+      if (L.startsWith('arbiter:')) return { finalized: false, records: [] }
+      return {}
+    },
+  })
+  const r = await E.buildSlices(E.NODES.build)
+  check(r.slices.shipped.length === 0, 'nothing ships when the arbiter refuses the debt  [E-04]')
+  check((r.slices.escalated[0] || {}).reason === 'arbiter-rejected', `and the slice is escalated with the real reason (got '${(r.slices.escalated[0] || {}).reason}')  [E-04]`)
 })
 
 console.log('')

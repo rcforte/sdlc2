@@ -58,8 +58,19 @@ stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, 
    With 02 and 03 both blocked by 01, the sharp check is the *negative* one — 02 must **not** be
    an ancestor of 03. That is the assertion run 1's slice shape could not express.
 3. Did the report node commit the paperwork to `sdlc2/<feature>`, leaving a clean tree?
-4. Do the per-round score histories climb, flatline, or oscillate? Two more runs of that decides
-   whether the doc-node makers are under-powered — see `SPEC.md` §12 risk 5.
+4. Do the per-round score histories climb, flatline, or oscillate? **v0.1.3 changed what this
+   measures.** Doc nodes now get **2 rounds**, not 5, the bar is **0.80**, and a `high` no longer
+   vetoes a document. So the question is no longer "why does it always cap out" — it is:
+   - does a doc node now **pass unaided**, and in how many rounds?
+   - is there any round with **`score ≥ bar` and no pass**? That is a *veto* round, and it is the
+     open question §1.1 of `sdlc2-enhance-1.md` could not settle from run 1's data.
+   - does the **plateau exit** ever fire, and was it right to?
+5. **Did anything actually run in a lane?** The lab now declares `commands.install`, so independent
+   slices should build concurrently in `.sdlc2/worktrees/`. Check the log for `▸ level 0: building
+   … ∥ …`, and check the worktrees were released — `git worktree list` should show only the main
+   checkout when the run ends, with every `slice/*` branch still present.
+6. **Did the po return its own slice manifest?** If it did, there is no `slices:resolve` spawn in
+   the log at all. If it did not, the fallback ran and that is worth knowing.
 
 ## Where we are
 
@@ -150,11 +161,25 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
 
 ## Repo states
 
-- **`~/dev/code/sdlc2`** — plugin. `main` at `1e7424b`, clean, **pushed**. v0.1.2 =
+- **`~/dev/code/sdlc2`** — plugin. **v0.1.3** implements every item in `sdlc2-enhance-1.md`:
+  doc rounds 5→2 with a plateau exit, thresholds 0.80, the repair brief now carries the checker's
+  per-criterion scores (a round that failed on score alone used to tell a round-3 maker it was its
+  "first attempt"), the build arbiter can no longer commit, cross-round checker memory, severity
+  anchors, four personas released from an interview they cannot run, parallel slice lanes in git
+  worktrees gated on a new `commands.install`, namespaced VH ids, per-slice UX join, and a
+  continuous executor in place of the wave barrier. `node verify.mjs` passes **262 checks**
+  (was 220), including six new behavioural probes.
+
+  **None of it has run against real agents** — the same trap as run 1 and v0.1.2. Run 2 is now
+  also the acceptance test for these changes.
+
+  The v0.1.2 line, for history —
   the engine (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`),
   both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
   `node verify.mjs` passes **220 checks**.
-- **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
+- **Installed is 0.1.2, local is 0.1.3 — push and `claude plugin update` BEFORE run 2, then
+  restart, or the run exercises none of the above.** The v0.1.2 parity note, for reference:
+  **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
   0.1.1 to 0.1.2 on 2026-08-21, and the resolved `${CLAUDE_PLUGIN_ROOT}` for 0.1.2 (a
   **version-numbered dir** under the marketplace plugin cache — resolve it at runtime rather than
   hardcoding it here, which `[R-PKG-03]` forbids; note 0.1.1 is still cached as a sibling, so the
@@ -165,7 +190,10 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
 - **`~/dev/code/sdlc2-lab`** — lab. `main` at `132bb41`, clean, 7 commits, suite green (31 tests,
   4 files, ~1.7s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
   to `main` and can be deleted whenever. `tsconfig.tsbuildinfo` is untracked and gitignored, and
-  `npm run build` was re-run to confirm it leaves the tree clean.
+  `npm run build` was re-run to confirm it leaves the tree clean. **Now also** ignores
+  `.sdlc2/worktrees/` and `.claude/worktrees/` — measured: one isolated agent takes the tree from
+  clean to `?? .claude/`, which fails sdlc2's own pre-check 1 — and declares
+  `install: "npm ci"`, which is what opens the parallel lanes.
 
 ## What to watch in run 2
 

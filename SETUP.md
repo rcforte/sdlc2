@@ -73,10 +73,11 @@ the only configuration sdlc2 has.
 <!-- sdlc2:config -->
 ```yaml
 commands:
-  test:  "./mvnw -q test"      # MANDATORY
-  build: ""                     # optional
-  run:   ""                     # optional
-  e2e:   ""                     # optional
+  test:    "./mvnw -q test"    # MANDATORY
+  build:   ""                   # optional
+  install: ""                   # optional — unlocks parallel slice lanes
+  run:     ""                   # optional
+  e2e:     ""                   # optional
 seam:
   backend:  "REST via MockMvc (@SpringBootTest)"
   frontend: ""
@@ -96,6 +97,7 @@ gate anything.
 |---|---|---|
 | `commands.test` | **Yes** | Everything. Run once as the baseline gate; quoted into every maker and checker prompt; run by the **tester**, whose `pass` is the only verdict no arbiter can overrule; the developer commits only when it is green. |
 | `commands.build` | No | Printed in prompts. The **code-reviewer** *may* run it to read build output. Nothing depends on it. |
+| `commands.install` | No, but it makes runs faster | **The only optional field that changes behaviour.** Declaring it lets independent slices build **concurrently**, each in its own git worktree. A fresh worktree has no installed dependencies, so this is the command that makes one testable — `npm ci`, `./mvnw -q dependency:go-offline`, `uv sync`. Without it every slice builds one after another and the run says so in its log. |
 | `commands.e2e` | No | Printed in prompts only. **The engine never commands it** — `testerPrompt` runs `commands.test` and nothing else. An E2E suite that is not inside `commands.test` is never a gate. |
 | `commands.run` | No | Printed in prompts. Nothing reads it. Purely informational. |
 | `seam.backend` | No, but do it | Printed in prompts. The **architect** is scored on naming a seam *"matching the project's declared seam"* (`AR-SEAM`, 0.25). |
@@ -103,6 +105,27 @@ gate anything.
 
 **The rule that follows from this table: whatever `commands.test` does not run, sdlc2 does not
 verify.** There is no second gate.
+
+### Two lines your `.gitignore` must have
+
+```gitignore
+.sdlc2/worktrees/
+.claude/worktrees/
+```
+
+Git worktrees are created **inside** the repository. sdlc2 puts a concurrently-built slice's tree
+under `.sdlc2/worktrees/`, and the Claude Code harness puts its own agent worktrees under
+`.claude/worktrees/`. Either one, un-ignored, shows up in `git status --porcelain` — which is
+exactly the check sdlc2's own pre-check 1 requires to be **empty**. Left out, the symptom is a run
+that refuses to start with a dirty tree it did not obviously dirty, or worse, a worktree swept into
+a slice commit.
+
+This is measured behaviour, not a precaution: launching one isolated agent in a repo without these
+lines takes `git status --porcelain` from empty to `?? .claude/`.
+
+Also make sure whatever `commands.install` produces is ignored — `node_modules/`, `target/`,
+`.venv/`. Each lane installs into its own worktree, so an un-ignored dependency directory becomes
+untracked noise in every one of them.
 
 ### Monorepos
 
@@ -270,14 +293,19 @@ Then: review the `slice/` branches, merge what you accept, and answer the open `
 
 Real, current, and worth knowing before you plan a feature.
 
-1. **Slices do not stack.** Every slice branch is cut from the default branch, so a slice with
-   `Blocked by:` does **not** contain its blocker's code. `Blocked by:` controls ordering and
-   skipping only. Today, keep multi-slice features to slices that stand alone against the default
-   branch — or run one slice per feature and merge between runs.
-2. **You commit the paperwork.** The developer commits only its slice's code. Everything under
-   `.sdlc2/` and `docs/adr/` is left as uncommitted working-tree changes, and pre-check 1 requires
-   a clean tree — so your *next* run is blocked until you commit them. Do it promptly: a stray
-   `git stash` or `git checkout` destroys the `VERIFY-WITH-HUMAN` record.
+1. **Slices stack, and merge order matters.** A slice with `Blocked by:` is cut from its
+   **blocker's branch**, so it contains the blocker's code and merging it merges the blocker too.
+   Merge in slice order. The tester proves this with `git merge-base --is-ancestor` rather than
+   taking the developer's word for it — an instruction alone did not hold on the first real run.
+   *(Fixed in v0.1.2; this entry used to say the opposite.)*
+2. **The paperwork is committed for you**, to a `sdlc2/<feature>` branch cut from the default
+   branch, leaving your tree clean. If the report carries a `## Paperwork not committed` section,
+   that step failed and the artifacts are still untracked — read it, because a lost
+   `VERIFY-WITH-HUMAN` record is unrecoverable. *(Fixed in v0.1.2.)*
+2b. **Parallel lanes need `commands.install`.** Without it, independent slices build one after
+   another. With it, they build concurrently in separate worktrees — which also means their test
+   suites run at the same time, so anything binding a **fixed port** will collide. Random-port
+   test setups are fine; a dev server pinned to 5173 is not.
 3. **`commands.e2e` is never run by the engine.** It is printed into prompts and nothing more. Put
    E2E inside `commands.test` or accept that it is not a gate.
 4. **`hasUiStories` gates the whole `ux` node** on the product owner's judgement. If it decides a

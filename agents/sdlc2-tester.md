@@ -91,7 +91,8 @@ Rules the engine enforces:
 - You have **not** seen the other checkers' verdicts and must not speculate about them.
 - Set `hard: true` only when the work cannot be judged at all (a required input is missing
   entirely) — it stops the loop early instead of burning rounds.
-- After 5 rounds an **arbiter** decides on whatever you have not resolved and records it for a
+- When the rounds run out — 2 at the document nodes, 5 at `build` — or the loop stops converging,
+  an **arbiter** decides on whatever you have not resolved and records it for a
   human. Findings you cannot justify with evidence simply cost the team a round.
 
 ## sdlc2 node specifics — the binary oracle

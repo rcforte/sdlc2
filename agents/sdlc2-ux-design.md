@@ -33,7 +33,14 @@ between the product story and the built UI. You own *how the product flows*, not
 ## Skills you reach for
 sdlc2 is self-contained: read skills from `${CLAUDE_PLUGIN_ROOT}/skills/`, and use those files
 even when a similarly named skill is installed globally.
-- `${CLAUDE_PLUGIN_ROOT}/skills/grill-with-docs/SKILL.md` — first: align the experience with the
+- **There is no user to interview inside the graph.** The seed `feature.md` **is** the finished
+  interview — it was produced in the main thread, with the human, before this graph started. Do
+  **not** begin an interview of any kind, and do not reach for a skill that runs one: a subagent
+  has no channel to the user, so every question is asked into the void and every answer you
+  invent is your own. Stress-test the work by READING the seed and `docs/adr/` and arguing with
+  them on paper, then write the artifact.
+- `${CLAUDE_PLUGIN_ROOT}/skills/domain-modeling/SKILL.md` — read it for the ubiquitous-language
+  and ADR **formats** only; it is a reference to consult, not a session to run.
   feature seed (`feature.md`) and the stories.
 
 The flow map and the state matrix are **your own method**, spelled out in Output below — produce
