@@ -133,11 +133,13 @@ sdlc2 shares **nothing** at runtime with any other harness.
 - `[R-LOOP-06]` **MUST**: a defect without quoted `evidence` is discarded by the engine, which
   says how many it dropped. `evidence` is a required field of the schema, so the discard is a
   backstop and not the primary gate.
-- `[R-LOOP-07]` **MUST**: after `rounds` unsuccessful rounds exactly one arbiter call runs — the
-  maker's persona at `opus`/`max`, given every unresolved defect — and its verdict is
-  `soft-pass`, never `pass`. The loop itself never arbitrates: it returns `needs-arbitration` and
-  the **executor** makes the call, **serially**, so that two concurrently-running nodes can never
-  read-then-append `VERIFY-WITH-HUMAN.md` at the same moment. An arbiter that returns nothing is a
+- `[R-LOOP-07]` **MUST**: when a node's rounds run out **or its loop stops converging**, exactly
+  one arbiter call runs — the maker's persona at `opus`/`high`, given every unresolved defect —
+  and its verdict is `soft-pass`, never `pass`. The loop itself never arbitrates: it returns
+  `needs-arbitration` and the **node runner** makes the call. It no longer has to be serialized —
+  ids are namespaced per arbiter (`[R-VH-02]`), so two concurrent arbiters cannot collide on
+  `VERIFY-WITH-HUMAN.md`, and an arbiter runs as soon as its own node needs one instead of queueing
+  behind the slowest node in the graph. An arbiter that returns nothing is a
   `hard-fail`, never a silent soft-pass.
 - `[R-LOOP-08]` **MUST**: a null or failed return — from a maker, a checker or an arbiter —
   consumes a round and adds a synthetic `critical` defect; nothing retries for free, and **no

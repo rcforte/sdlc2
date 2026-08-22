@@ -880,9 +880,12 @@ async function arbitrate(node, result) {
 }
 
 // ─────────────────────────────────────────────────────── build node ────
-// Sequential by design: one slice at a time, one branch each, no worktrees. Nothing runs
-// concurrently, so no isolation machinery is needed — and the entire class of parallel-tree
-// bugs cannot occur. Parallelism is a later decision, made with real timing data.
+// Slices are scheduled by DEPENDENCY LEVEL. Independent slices may build concurrently, each in its
+// own git worktree, but only where a fresh tree can actually be tested — which needs a declared
+// `commands.install`, because a new worktree has no installed dependencies. Without it the engine
+// builds one slice at a time in the session's own checkout, and says so rather than degrading
+// quietly. Either way `[R-BUILD-07]` holds PER SLICE: developer, tester and reviewer all inspect
+// exactly one tree, and it is the same one.
 // Which branch a slice is cut from. A slice with `Blocked by:` needs its blocker's CODE, not just
 // its issue file: cut it from BASE and the acceptance test runs against a tree where the blocker
 // never happened. Slices arrive in dependency order, so a blocker has already shipped (or this
