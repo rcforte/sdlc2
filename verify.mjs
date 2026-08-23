@@ -16,6 +16,7 @@
 // can. Exits non-zero on any failure.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -38,6 +39,44 @@ check(market && market.plugins && market.plugins.length === 1 && market.plugins[
 check(existsSync(join(ROOT, 'commands/sdlc2.md')), 'router command commands/sdlc2.md exists  [R-PKG-02]')
 for (const m of ['modes/new-feature.md', 'modes/status.md']) check(existsSync(join(ROOT, m)), `${m} exists`)
 check(plugin && plugin.version === R('VERSION').trim(), `plugin.json version matches VERSION (${R('VERSION').trim()})`)
+
+// [R-PKG-07 / SD-09] A tagged version whose engine has since moved is a release that was never
+// cut: the repo and the install cache then both call themselves that version and differ in
+// content. Nothing at RUN time can see it — the directory names match, VERSION agrees with
+// itself, and [R-PKG-06]'s sibling comparison finds nothing newer — so the guard has to live
+// here, in the repo, where the mistake is made.
+const RUNTIME_READ = ['new-feature.workflow.js', 'commands', 'modes', 'agents', 'skills', '.claude-plugin/plugin.json']
+{
+  const version = R('VERSION').trim()
+  const git = (...args) => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  let inRepo = true
+  try { git('rev-parse', '--git-dir') } catch { inRepo = false }
+
+  if (!inRepo) {
+    ok(`not a git checkout — this is an install cache, engine-vs-tag check does not apply  [R-PKG-07]`)
+  } else {
+    let tagged = true
+    try { git('rev-parse', '--verify', `refs/tags/v${version}`) } catch { tagged = false }
+
+    if (!tagged) {
+      ok(`VERSION ${version} has no v${version} tag yet — a release in preparation, engine may move freely  [R-PKG-07]`)
+    } else {
+      // Committed drift AND uncommitted drift both count: either one ships an engine the tag does not describe.
+      const moved = new Set()
+      for (const range of [[`v${version}`, 'HEAD'], [`v${version}`]]) {
+        let out = ''
+        try { out = git('diff', '--name-only', ...range, '--', ...RUNTIME_READ) } catch { out = '' }
+        for (const f of out.split('\n').map((x) => x.trim()).filter(Boolean)) moved.add(f)
+      }
+      check(
+        moved.size === 0,
+        moved.size === 0
+          ? `no runtime-read file has moved since v${version} was tagged  [R-PKG-07]`
+          : `ENGINE MOVED SINCE v${version} WAS TAGGED — bump VERSION: ${[...moved].sort().join(', ')}  [R-PKG-07]`,
+      )
+    }
+  }
+}
 
 // ── 2. independence ───────────────────────────────────────────────────────
 group('independence  [R-IND-01..04]')

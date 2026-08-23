@@ -8,15 +8,16 @@
 
 ## Do this first
 
-**Install 0.1.7 and restart, then run 5.** Run 4 is done and merged; the reason a restart is
-needed again is a new finding, **SD-09**, filed in the lab's `docs/harness-findings.md`.
+**Install 0.1.8 and restart, then run 5.** Run 4 is done, merged, and its human-verify pass is
+closed out. 0.1.7 was tagged but never installed, so **0.1.7 and 0.1.8 collapse into one update
+and one restart** — do not install them separately.
 
 | gate | state |
 |---|---|
-| plugin repo | `main` = `origin/main` = the **`v0.1.7`** tag, pushed |
+| plugin repo | `main` = `origin/main` = the **`v0.1.8`** tag, pushed |
 | installed plugin | **still 0.1.6 at `09839cf`** — `claude plugin update` has not been run |
-| lab repo | `main` = `origin/main`, clean, run 4 merged, suite green |
-| checks | `node verify.mjs` → **371**, was 366 |
+| lab repo | `main` = `origin/main`, clean, run 4 merged, VH pass closed, suite green (125 tests, 5 files) |
+| checks | `node verify.mjs` → **372**, was 366 |
 | restart | **required**, and a session pins its plugin root at start (SD-03) |
 
 **SD-09 — two engines can both call themselves 0.1.6, and pre-check 0 cannot tell.** Run 4's own
@@ -25,8 +26,12 @@ install cache were both "0.1.6" and three engine files apart. Pre-check 0 compar
 *names* against version-numbered siblings — both are literally `0.1.6`, nothing newer exists, so
 it passes and the run proceeds on the older engine. SD-03 catches *older directory, newer one
 installed*; this is *same name, different contents*, which no name comparison can catch. Unblocked
-by shipping `[R-REP-06]` as **0.1.7**; **the finding stays open** — the guard worth building is a
-`verify.mjs` probe that fails when tracked engine files differ from the tag named by `VERSION`.
+by shipping `[R-REP-06]` as **0.1.7**, and the guard is now built: **`[R-PKG-07]`** in 0.1.8 fails
+`verify.mjs` when a runtime-read file has moved since the tag named by `VERSION` was cut. It is
+proven against the real case — replay `9966578` with `VERSION` at `0.1.6` and it names
+`new-feature.workflow.js`. **The second half is still open:** a report names the *version*, not the
+*build*, so a stale run is still not identifiable from its own report. Stamping the commit sha into
+the plugin at release is what closes that.
 
 **Run 4 is DONE** — `nf-20260823T2033Z`, feature `saved-at`, 4 slices, all merged to lab `main`.
 Report header reads `Engine: sdlc2 0.1.6`, so **SD-03 holds for the second time**. `git worktree
@@ -226,6 +231,7 @@ Also confirmed working, per the lab's findings file:
 | 6c | **v0.1.6 — the `sdlc2-enhance-2` batch** | **done** — sixteen items, all but E2-01. 366 checks green (was 311) |
 | 6d | **Run 4 — the acceptance test for 0.1.5 AND 0.1.6** | **done** — `nf-20260823T2033Z` (`saved-at`), 4 slices, all merged. SD-03 and SD-04 hold again. Found the fan-out row |
 | 6e | **v0.1.7 — `[R-REP-06]`, the fan-out row; SD-09 filed** | **done** — 371 checks green (was 366). Not yet run against real agents |
+| 6f | **v0.1.8 — `[R-PKG-07]`, the SD-09 guard** | **done** — 372 checks green. Repo-side only; the build stamp is still open. Not yet run against real agents |
 | 7 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
 The order held up, and the pattern is now four for four: **every bug in this project has been

@@ -63,6 +63,21 @@ sdlc2 shares **nothing** at runtime with any other harness.
   comparison. Runs 1 and 2 of this plugin executed `0.1.1` while `0.1.2` was installed: ~6.3M agent
   tokens measuring a superseded engine, two defects "found" that were already fixed upstream, and
   nothing anywhere said so.
+- `[R-PKG-07]` **MUST**: `VERSION` **MUST** be bumped in the same change that alters the engine.
+  Concretely: when a tag named `v<VERSION>` exists, no runtime-read file may differ between that
+  tag and the working tree. `[R-PKG-06]` catches a session pinned to an *older directory* while a
+  newer one is installed, which a name comparison can see. It cannot see the other shape of the
+  same failure — **two builds sharing one version number**, where the repo and the install cache
+  are both `0.1.6` and differ in content. Nothing at run time can detect that: the directory names
+  match, `VERSION` agrees with itself, and the engine path is correct, so the run proceeds on the
+  older engine and its report names a version that is true and useless. It also leaves no tell —
+  `[R-PKG-06]`'s case surfaced only because the two engines were far enough apart to contradict
+  each other. The guard therefore lives in the **repo**, not the run: a tagged version whose
+  engine has since moved is a release that was never cut. Runtime-read means
+  `new-feature.workflow.js`, `commands/`, `modes/`, `agents/`, `skills/` and
+  `.claude-plugin/plugin.json` — not `SPEC.md`, `verify.mjs` or the working notes, which no run
+  reads. A version with no matching tag is a release in preparation and is not a violation; a
+  checkout with no git is the install cache, where the check does not apply.
 - `[R-PKG-05]` **MUST**: the bundled installers (`install.sh`, `install.ps1`) install **only**
   through documented `claude plugin` subcommands. They **MUST NOT** run `git`, write any path
   under the user's home directory, or modify a project's `CLAUDE.md`; and they **MUST NOT**
@@ -375,6 +390,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-PKG-03 | `commands/sdlc2.md`, `modes/*.md` | `${CLAUDE_PLUGIN_ROOT}` present, `~/.claude` absent | ✅ |
 | R-PKG-04 | `commands/sdlc2.md` | read the router's rules | 👁 |
 | R-PKG-06 | `modes/new-feature.md` pre-check 0 | greps: reads VERSION beside the plugin root, detects a higher-sorting sibling, stops on it, and passes `version` in the args | ✅ |
+| R-PKG-07 | `VERSION`, `.claude-plugin/plugin.json`, every runtime-read path | probe diffs the runtime-read set between tag `v<VERSION>` and the working tree; skips when the tag is absent (release in preparation) or git is (the install cache) | ✅ |
 | R-PKG-05 | `install.sh`, `install.ps1` | greps: only `claude plugin` for installation, no `git`, no home-dir path, no `CLAUDE.md` write, no prompt, no `Commands` assertion; the asserted agent/skill counts equal the shipped persona/skill counts; both documented in the README with a matching raw URL | ✅ |
 | R-CFG-01/03/05 | `modes/new-feature.md` §1.4 | read the mode's config step | 👁 |
 | R-CFG-02 | `assertArgs()` | the engine throws when `commands.test` is empty, and runs when it is not | ✅ |
