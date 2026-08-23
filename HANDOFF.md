@@ -176,10 +176,14 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   settled*. `[R-BUILD-04a]`, `[R-REP-03]`, the tester's base assertions, `DOC_ROUNDS = 2` and the
   parallel lanes all executed against real agents. The lanes brought SD-04 with them.
 
-  **Installed = local, verified 2026-08-22 22:35 UTC.** `installed_plugins.json` records
-  `version: "0.1.3"` at `gitCommitSha: a0dc296`, which is this repo's HEAD with a clean tree, and
-  a recursive diff of the repo against the install cache is identical apart from the harness's own
-  `.in_use` marker. Resolve `${CLAUDE_PLUGIN_ROOT}` at runtime rather than hardcoding it —
+  **Installed engine = local engine, verified 2026-08-23.** `installed_plugins.json` records
+  `version: "0.1.3"` at `gitCommitSha: a0dc296`. Repo HEAD is now `8f85245` — **one docs-only
+  commit ahead**, touching `HANDOFF.md` and nothing else, so a recursive diff of the repo against
+  the install cache reports exactly two differences: this file, and the harness's own `.in_use`
+  marker. **Every executable path — `new-feature.workflow.js`, `modes/`, `skills/`, `agents/`,
+  `VERSION` — is identical.** Do not read that one-file delta as version skew; re-check it the
+  same way rather than assuming, and expect it to disappear the next time the marketplace clone
+  updates. Resolve `${CLAUDE_PLUGIN_ROOT}` at runtime rather than hardcoding it —
   `[R-PKG-03]` forbids the literal path, and 0.1.1 and 0.1.2 are still cached as siblings, so the
   parent dir is not the answer. **Parity is not resolution**: the files matching says nothing
   about which persona answers to `sdlc2:sdlc2-po`, so still probe that from the lab session before
