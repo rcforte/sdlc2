@@ -4,12 +4,46 @@
 
 ## Do this first
 
-**Step 6: run 3 — the acceptance test for v0.1.4.** v0.1.4 is **written and green** (304 checks,
-was 262) but **has never run against real agents** — the same trap as run 1, v0.1.2 and v0.1.3,
-three for three. Before run 3 exercises any of it: `git push`, then
-`claude plugin marketplace update sdlc2-marketplace`, then
-`claude plugin update sdlc2@sdlc2-marketplace`, then **restart** — a session pins its plugin root
-at start (SD-03), so an update without a restart changes nothing.
+**Step 6: run 3 is DONE** — `nf-20260823T1333Z`, feature `remembered-names`, 2h 21m, 43 agents,
+3.0M subagent tokens, 0 agent errors. Seven slices shipped, none escalated, no soft-passes, four
+VH rows left open. The seed was the proposed one below, grilled in the lab session.
+
+**What it settled, fix by fix.** **SD-04 holds**: 25 agents built in
+`../.sdlc2-worktrees/remembered-names-nf-20260823T1333Z/<slice>`, the suite reported the project's
+own 4 test files every time and never N+1, and `git worktree list` ended with only the main
+checkout. **SD-03 holds**: the report opens `Engine: sdlc2 0.1.4`. **SD-07 holds, and visibly**:
+the architect refused to add an undeclared `Blocked by:` edge for issue 06 and filed it against the
+`po` node instead, which is exactly the behaviour the fix was for. **SD-05 is still unproven** —
+43 agents, zero errors, so the free-retry path never fired. Three runs in, it has never been
+exercised.
+
+**What it found: SD-08** (below), fixed and shipped as **v0.1.5** — `[R-REP-05]`, 311 checks
+green, was 304. **It has not itself been run**, so it joins the same queue every other fix has sat
+in. It rides its own version rather than becoming a second tree calling itself 0.1.4, which is the
+thing the `v0.1.4` tag was created to prevent.
+
+**Next is step 6b**, `sdlc2-enhance-2.md`, unchanged by run 3 except that E2-03/04/05 were live
+during it — see the note below.
+
+**The version gates are closed** (2026-08-23). `main` is pushed and matches `origin/main` at
+`90131b9`; `installed_plugins.json` records `version: "0.1.4"` at that same sha; a recursive diff
+of the repo against the install cache reports only the harness's own `.in_use` marker; and the lab
+session was launched after the update and **confirmed running 0.1.4**. That last clause is the one
+that matters — a session pins its plugin root at start (SD-03), so parity at *install* time is not
+parity at *run* time. Nothing left to push, update or restart.
+
+The seed and the persona probe are both spent: the run resolved `agentPrefix: "sdlc2:"` from the
+available agent types and the nine namespaced personas answered throughout. The unprefixed global
+lookalikes were never reachable, because only the plugin's are namespaced.
+
+**Read `sdlc2-enhance-2.md` before interpreting run 3.** Three of its items change what the run's
+own numbers mean: the plateau exit **cannot fire** (E2-03), so "it never fired" is not a data gap;
+every code-review score is produced under a fail-biased instruction the engine was supposed to have
+removed (E2-04); and a developer spawn that never answers is reported to the next attempt as a
+checker refutation (E2-05). **All three were live during run 3**, so read its report knowing they
+are there: no plateau exit could have fired, every code-review score in the slice table was
+produced under the fail-biased instruction, and slice 06's four attempts should be re-read with
+E2-05 in mind before its score is treated as a judgement about the code.
 
 What v0.1.4 changed, and what run 3 has to confirm about each:
 
@@ -21,6 +55,24 @@ What v0.1.4 changed, and what run 3 has to confirm about each:
 | **SD-07** | `issues/` is the single source of truth for the queue: the architect mandate, the persona, `design.md`'s output note and the new **`AR-QUEUE`** rubric criterion all say so. `[R-ARCH-03]` | `design.md` asserts no `Blocked by:` edge absent from `issues/`. If the architect disagrees with the queue it must show up as a defect against the `po` node, not as an edge downstream |
 
 
+**SD-08 — the report could not say how the slices were built.** Found by run 3, fixed in the
+working tree. The scheduler knew whether it opened lanes and which slices shared a level, and
+`log()`ed it — which reaches the person watching the run and nobody else. The report, the artifact
+that outlives the run, was never handed the fact, so run 3's report is silent in both directions:
+it does not say lanes fired, and they did (four slices off `01` built together; a dozen agents
+finished within five minutes of each other), and it does not say they did not. `modes/new-feature.md`
+step 3b tells the main thread to read this *out of the report*, so that instruction had nothing to
+read. Fixed by `[R-REP-05]`: the scheduler records `lanes`, the build node carries it out with its
+rows, and the report prompt is handed it and told to state it either way — naming `commands.install`
+as the one-line change when lanes stayed shut. Seven checks assert the chain at every hop, because a
+break anywhere leaves the report silent exactly as it was. Shipped as **v0.1.5**.
+**Not yet confirmed against a real run.**
+
+**Not a defect, though it reads like one:** an empty `../.sdlc2-worktrees` container is left behind
+after a run. Each run stamps and removes its own `<feature>-<runId>` directory inside it; the release
+instruction says `rmdir` that container and **never its parent**, because a concurrent run may hold a
+sibling. The 4KB directory is the price of that safety — do not 'fix' it.
+
 SD-06 (a background workflow makes no progress while the session sits idle — 3h 01m of dead time
 inside a 4h 41m run) is a **harness** issue, not sdlc2's. Nothing to fix here; it does mean any
 wall-clock number from run 2 is meaningless, and that a graph run should not be left unattended.
@@ -31,6 +83,16 @@ after two runs), the **plateau exit** (never fired), and `hasUiStories` (still u
 those need a diamond — they need a doc node that struggles, which is not something a seed can order
 up. Reuse the diamond recipe under *What run 2 settled* anyway: it is what makes lanes do anything,
 and lanes are what SD-04 changed.
+
+**Proposed seed (2026-08-23, not yet run):** *"Remember more than one name, not just the last
+one."* The lab saves a single name today; replacing that one slot with a short list should cut a
+base slice (save a list), three independent slices off it (remove one, cap the list at five,
+most-recent-first) and a rejoin (clear the list — it needs the removal work, and the full-list
+message has to disappear after it). That is the diamond, and it has screens, so `ux` runs. It also
+carries one genuinely contested rule — **what happens when the same name is saved twice**
+(ignore / replace / move to top) — left deliberately unsettled during the interview, because a doc
+node with something real to fumble on is the only lever there is on the veto-round and plateau
+questions.
 
 ## What run 2 settled
 
@@ -93,7 +155,9 @@ Also confirmed working, per the lab's findings file:
 | 3b | *(unplanned)* `greeting-log` run + v0.1.3 | **done** — `nf-20260822T0327Z`; revealed SD-03, prompted `sdlc2-enhance-1.md` → v0.1.3. Seed cut a pure chain, so it could not test the fix |
 | 4 | **Run 2 proper: 0.1.3, lab session, diamond seed** | **done** — `nf-20260822T2305Z` (`saved-name`), 5 slices, 1 soft-pass, 6 VH records resolved and merged to lab `main`. `[R-BUILD-04a]` confirmed |
 | 5 | **v0.1.4 — fix SD-03, SD-04, SD-05, SD-07** | **done** — all four fixed, 304 checks green (was 262) |
-| 6 | **Run 3 — the acceptance test for v0.1.4** | **next**, and it must be pushed + `claude plugin update`d + a session restart FIRST |
+| 6 | **Run 3 — the acceptance test for v0.1.4** | **done** — `nf-20260823T1333Z` (`remembered-names`), 7 slices, 0 escalated, 0 soft-passes, 4 VH rows open. SD-03/04/07 confirmed against real agents; **SD-05 never fired** (43 agents, 0 errors) and stays unproven. Found SD-08 |
+| 6a | **v0.1.5 — SD-08, the report never said whether lanes fired** | **done** — `[R-REP-05]`, 311 checks green (was 304). Not yet run against real agents |
+| 6b | **Round 2 of enhancements** — `sdlc2-enhance-2.md` | **written 2026-08-23, none implemented.** Ten items: four engine defects found by reading v0.1.4 against its own claims, the two packaging/independence items, and four judgement calls. To be worked AFTER run 3 |
 | 7 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
 The order held up, and the pattern is now four for four: **every bug in this project has been
@@ -197,30 +261,28 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   including 42 new ones across five probes. **None of it
   has run against real agents.**
 
-  **STALE AS OF v0.1.4 — installed is 0.1.3, local is 0.1.4.** Push, update, restart before run 3.
-  The v0.1.3 parity note, for method: `installed_plugins.json` records
-  `version: "0.1.3"` at `gitCommitSha: a0dc296`. Repo HEAD is now `8f85245` — **one docs-only
-  commit ahead**, touching `HANDOFF.md` and nothing else, so a recursive diff of the repo against
-  the install cache reports exactly two differences: this file, and the harness's own `.in_use`
-  marker. **Every executable path — `new-feature.workflow.js`, `modes/`, `skills/`, `agents/`,
-  `VERSION` — is identical.** Do not read that one-file delta as version skew; re-check it the
-  same way rather than assuming, and expect it to disappear the next time the marketplace clone
-  updates. Resolve `${CLAUDE_PLUGIN_ROOT}` at runtime rather than hardcoding it —
-  `[R-PKG-03]` forbids the literal path, and 0.1.1 and 0.1.2 are still cached as siblings, so the
-  parent dir is not the answer. **Parity is not resolution**: the files matching says nothing
-  about which persona answers to `sdlc2:sdlc2-po`, so still probe that from the lab session before
-  spending the run. And per SD-03, parity at *install* time is not parity at *run* time — a
-  session pins its plugin root at start, so the lab session must be launched **after** the
-  update, not merely on a machine where the update happened.
+  **RESOLVED 2026-08-23 — installed is 0.1.4 at `gitCommitSha: 90131b9`, the same sha as repo
+  HEAD**, and the lab session was launched after the update and confirmed running 0.1.4. A
+  recursive diff of the repo against the install cache reports exactly one difference: the
+  harness's own `.in_use` marker. **Every executable path — `new-feature.workflow.js`, `modes/`,
+  `skills/`, `agents/`, `VERSION` — is identical.**
+
+  Method, for the next time this has to be checked. A one-file delta against the cache is normally
+  this file plus the `.in_use` marker, not version skew; re-check it the same way rather than
+  assuming. Resolve `${CLAUDE_PLUGIN_ROOT}` at runtime rather than hardcoding it —
+  `[R-PKG-03]` forbids the literal path, and 0.1.1, 0.1.2 and 0.1.3 are all still cached as
+  siblings, so the parent dir is not the answer. **Parity is not resolution**: the files matching
+  says nothing about which persona answers to `sdlc2:sdlc2-po`, so still probe that from the lab
+  session before spending the run. And per SD-03, parity at *install* time is not parity at *run*
+  time — a session pins its plugin root at start, so the lab session must be launched **after**
+  the update, not merely on a machine where the update happened.
 
   The v0.1.2 line, for history —
   the engine (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`),
   both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
   `node verify.mjs` passes **220 checks**.
-- *(The 2026-08-21 "installed is 0.1.2, push before run 2" item is **done** — see the parity
-  paragraph above.)*
-  **Parity is not resolution** — the files matching says nothing about which persona answers to
-  `sdlc2:sdlc2-po`, so still probe that from the lab session before spending the run.
+- *(The 2026-08-21 "installed is 0.1.2, push before run 2" item is **done**, and so is the
+  2026-08-23 "installed is 0.1.3" one — see the parity paragraph above.)*
 - **`~/dev/code/sdlc2-lab`** — lab. `main` at `40cbfc0`, clean, suite green (**61 tests, 4 files,
   2.92s** — re-run 2026-08-23). Carries **run 2 merged**: `saved-name`'s five slices, its
   artifacts, and the six VH records resolved (`40cbfc0`); the `slice/saved-name/*` branches are

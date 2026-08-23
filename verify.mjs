@@ -431,6 +431,16 @@ check(/const VERSION_RAN = A\.version \|\| 'unknown'/.test(src), 'the engine car
 check(/log\(`sdlc2 \$\{VERSION_RAN\}/.test(src), 'and names it on the FIRST line of the run  [R-REP-04]')
 check(/Engine: sdlc2 \$\{VERSION_RAN\}/.test(src), 'and in the report header  [R-REP-04]')
 check(/Engine path: \$\{ROOT\}/.test(src), 'with the plugin root it actually ran from  [R-REP-04]')
+// [SD-08 / R-REP-05] The scheduler knew whether lanes fired and told only the live log. The report
+// is the artifact that outlives the run, so it has to carry it too — asserted at every hop, because
+// a break anywhere in the chain leaves the report silent in exactly the way run 3's was.
+check(/const lanes = \{ lanes: LANES, install: install \|\| null, widest: widest/.test(src), 'the scheduler records how it scheduled  [R-REP-05]')
+check(/lanes\.batches\.push\(\{ level: lv, ids: group\.map/.test(src), 'the sequential path records its batch too, not just the parallel one  [R-REP-05]')
+check(/lanes\.batches\.push\(\{ level: lv, ids: batch\.map/.test(src), 'and the parallel path records which ids ran together  [R-REP-05]')
+check(/rows: rows, lanes: lanes \}/.test(src), 'the build node carries the lane record out with its rows  [R-REP-05]')
+check(/`Lanes: \$\{JSON\.stringify\(build\.lanes\)\}/.test(src), 'and the report prompt is handed it  [R-REP-05]')
+check(/\(2b\) \[R-REP-05\] how the slices were BUILT/.test(src), 'which is told to state it, in its own numbered section  [R-REP-05]')
+check(/never omitted/.test(src) && /commands\.install/.test(src), 'either way — including naming the config change that would open the lanes  [R-REP-05]')
 // `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the
 // engine said, which is the opposite of merging. Exclude it by name rather than loosening the grep.
 check(!/\bmerge\b[^\n]*\$\{BASE\}|git merge(?!-base)/.test(src), 'the engine never merges  [R-BUILD-06]')

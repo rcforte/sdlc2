@@ -1172,7 +1172,7 @@ async function buildSlices(node) {
   const slices = (plan && plan.slices) || []
   if (!slices.length) {
     log('No slices found — the product-owner node produced no issues.')
-    return { node: node.id, verdict: 'hard-fail', score: null, rounds: 0, reason: 'no slices queued', slices: { shipped: [], escalated: [], skipped: [], rows: [] } }
+    return { node: node.id, verdict: 'hard-fail', score: null, rounds: 0, reason: 'no slices queued', slices: { shipped: [], escalated: [], skipped: [], rows: [], lanes: null } }
   }
   // [E-07] Dependency LEVELS. Iterated to a fixpoint rather than assumed from arrival order: the
   // manifest above is whatever the po returned, and a slice listed before its blocker would
@@ -1414,6 +1414,10 @@ async function buildSlices(node) {
   }
 
   const widest = levels.reduce((m, g) => Math.max(m, (g || []).length), 0)
+  // [SD-08 / R-REP-05] What follows was only ever `log()`ed, which reaches the watching human and
+  // nothing else: the report — the artifact that outlives the run — never learned whether slices
+  // built concurrently or in a line. Record it as data so the report node can state it either way.
+  const lanes = { lanes: LANES, install: install || null, widest: widest, concurrent: false, batches: [] }
   if (LANES === 1 && widest > 1) {
     log(`${widest} slice(s) are independent and could build concurrently, but the project declares no \`commands.install\`; a fresh worktree would have no dependencies to test against. Building sequentially.`)
   }
@@ -1424,11 +1428,14 @@ async function buildSlices(node) {
     if (LANES === 1 || group.length === 1) {
       // Sequential path — the session's own working tree, exactly as before. [R-BUILD-07]
       for (const sl of group) await runSlice(sl, '')
+      lanes.batches.push({ level: lv, ids: group.map((x) => x.id), concurrent: false })
       continue
     }
     for (let i = 0; i < group.length; i += LANES) {
       const batch = group.slice(i, i + LANES)
       log(`▸ level ${lv}: building ${batch.map((x) => x.id).join(' ∥ ')} in separate worktrees.`)
+      lanes.batches.push({ level: lv, ids: batch.map((x) => x.id), concurrent: batch.length > 1 })
+      if (batch.length > 1) lanes.concurrent = true
       await parallel(batch.map((sl) => () => runSlice(sl, `${WORKTREES}/${sl.id}`)))
     }
   }
@@ -1473,7 +1480,7 @@ async function buildSlices(node) {
     verdict: verdict,
     score: null,
     rounds: 0,
-    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows },
+    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows, lanes: lanes },
   }
 }
 
@@ -1494,7 +1501,7 @@ async function writeReport(node) {
         reason: r.reason || null,
       }
     })
-  const build = results.build && results.build.slices ? results.build.slices : { shipped: [], escalated: [], skipped: [], rows: [] }
+  const build = results.build && results.build.slices ? results.build.slices : { shipped: [], escalated: [], skipped: [], rows: [], lanes: null }
   const softPassed = nodeRows
     .filter((r) => r.verdict === 'soft-pass')
     .map((r) => r.node)
@@ -1512,6 +1519,7 @@ async function writeReport(node) {
       `Engine: sdlc2 ${VERSION_RAN}\nEngine path: ${ROOT}\n` +
       `Node results: ${JSON.stringify(nodeRows)}\n` +
       `Slices: ${JSON.stringify(build.rows)}\n` +
+      `Lanes: ${JSON.stringify(build.lanes)}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
       `Maker disputes (checker findings the maker addressed but disagreed with): ${JSON.stringify(disputed)}\n\n` +
       `Structure: (0) a header carrying Feature, Run, Base branch, AND \`Engine: sdlc2 <version>\`\n` +
@@ -1530,6 +1538,14 @@ async function writeReport(node) {
       `(2) a slice table — slice · attempts · verdict · branch@sha · cut from (the \`base\` field) ·\n` +
       `review score · reason. A \`base\` that is another slice's branch means the slice was stacked\n` +
       `on the blocker it declared; say so rather than leaving the reader to infer it;\n` +
+      `(2b) [R-REP-05] how the slices were BUILT, from \`Lanes\` — one short paragraph, never omitted.\n` +
+      `If \`concurrent\` is true, say which ids ran together (each \`batches\` entry with more than one\n` +
+      `id is one such group) and that each had its own worktree outside the repo. If it is false,\n` +
+      `say they were built one at a time, and give the reason: \`install\` being null means the\n` +
+      `project declares no \`commands.install\`, so a fresh worktree would have no dependencies to\n` +
+      `test against — name it as the one-line config change that would unlock lanes. A \`widest\` of\n` +
+      `1 means nothing was independent enough to run beside anything else, which is not a config\n` +
+      `problem. A reader who was not watching the run has no other way to learn any of this;\n` +
       `(3) a human-verify index: read ${VH} if it exists and list every OPEN row (id · node ·\n` +
       `severity · one-line decision);\n` +
       `(4) the maker disputes, if any — they are unresolved disagreements, not noise;\n` +

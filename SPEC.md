@@ -334,6 +334,12 @@ checking anything out.
   the **first line of the run**. A report that does not say which engine wrote it cannot be trusted
   to be about the engine its reader thinks was installed, and a run report is the artifact that
   outlives the log.
+- `[R-REP-05]` **MUST**: the report says **how the slices were built** — concurrently in their own
+  worktrees, naming which ran together, or one at a time with the reason. The scheduler already
+  knew this and only `log()`ed it, which reaches the person watching and nobody else; a reader
+  coming to the report afterwards could not tell a run that used its lanes from one that silently
+  did not. When lanes stayed shut because the project declares no `commands.install`, the report
+  names that as the one-line config change that opens them (`[SD-08]`, found by run 3).
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
   it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
   rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
@@ -403,6 +409,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-VH-02 | `arbiterPrompt`, `buildArbiterPrompt` | ids are namespaced per arbiter (`VH-<node>-NN`, `VH-build-<slice>-NN`), so concurrent arbiters cannot collide; the loop still never arbitrates itself | ✅ |
 | R-REP-01/02 | the report prompt, `walk()` | a probe asserts the report node runs after an aborted graph; its wording is read | ✅ 👁 |
 | R-REP-04 | `VERSION_RAN`, `walk()`, the report prompt | a probe asserts the version reaches the report prompt, that an unstamped run says `unknown` rather than guessing, and that the run's first log line names the engine | ✅ |
+| R-REP-05 | the lane scheduler, the report prompt | the scheduler records `lanes` (batches, widest, install) and the build node carries it; the report prompt is handed it and told to state it either way | ✅ |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 
