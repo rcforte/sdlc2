@@ -256,7 +256,8 @@ const EXPORTS = [
   'blockingOpen', 'auditMaker', 'makerPrompt', 'checkerPrompt', 'arbiterPrompt',
   'escalationPrompt', 'rubricTable', 'conventions', 'runLoop', 'arbitrate', 'buildSlices', 'walk',
   'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt', 'spawn', 'SPAWN_RETRIES',
-  'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs',
+  'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs', 'settle',
+  'planLines', 'sliceTableLines', 'upstreamDisputes',
 ]
 const ARGS = {
   feature: 'demo', title: 'Demo', runId: 'nf-test', defaultBranch: 'main',
@@ -411,8 +412,11 @@ check(/Math\.min\.apply/.test(src) && !/scored\.reduce/.test(src), 'step score i
 // for anything running beside a sibling.
 check(/async function runSlice\(slice, wt\)/.test(src), 'one slice is built by one callable unit  [R-BUILD-04]')
 check(/levelOf\[sl\.id\] = lv/.test(src), 'slices are scheduled by dependency LEVEL, not in a flat line  [R-BUILD-04]')
-check(/const LANES = install \? 4 : 1/.test(src), 'lanes open only when the project declares an install command  [R-BUILD-04]')
-check(/await parallel\(batch\.map/.test(src), 'independent slices within a level run concurrently  [R-BUILD-04]')
+check(/const LANES = install \? MAX_LANES : 1/.test(src), 'lanes open only when the project declares an install command  [R-BUILD-04]')
+check(/const declaredLanes = Math\.floor\(Number\(CONFIG\.lanes\)\)/.test(src), 'and how many lanes is the project\'s to declare, not a literal  [E2-10]')
+check(/await Promise\.race\(Object\.keys\(running\)/.test(src), 'the scheduler waits on the FIRST slice to land, not on a whole level  [E2-14]')
+check(!/for \(let lv = 0; lv < levels\.length; lv\+\+\)/.test(src), 'and no level barrier survives  [E2-14]')
+check(/const ready = \(sl\) => \(sl\.blockedBy \|\| \[\]\)\.every/.test(src), 'readiness is a slice\'s own blockers  [E2-14]')
 check(src.includes('git worktree add ${wt}'), 'a concurrently-built slice gets its OWN worktree  [R-BUILD-07]')
 check(src.includes('git worktree remove --force'), 'and the worktrees are released when building ends  [R-BUILD-07]')
 check(!/WORKTREES = `\$\{DIR\}/.test(src), 'worktrees live OUTSIDE the feature dir the report node commits  [R-REP-03]')
@@ -435,9 +439,13 @@ check(/Engine path: \$\{ROOT\}/.test(src), 'with the plugin root it actually ran
 // is the artifact that outlives the run, so it has to carry it too — asserted at every hop, because
 // a break anywhere in the chain leaves the report silent in exactly the way run 3's was.
 check(/const lanes = \{ lanes: LANES, install: install \|\| null, widest: widest/.test(src), 'the scheduler records how it scheduled  [R-REP-05]')
-check(/lanes\.batches\.push\(\{ level: lv, ids: group\.map/.test(src), 'the sequential path records its batch too, not just the parallel one  [R-REP-05]')
-check(/lanes\.batches\.push\(\{ level: lv, ids: batch\.map/.test(src), 'and the parallel path records which ids ran together  [R-REP-05]')
-check(/rows: rows, lanes: lanes \}/.test(src), 'the build node carries the lane record out with its rows  [R-REP-05]')
+check(/lanes\.batches\.push\(\{ level: levelOf\[sl\.id\], ids: \[sl\.id\], concurrent: withOthers \}\)/.test(src), 'every slice start is recorded with whether it shared the clock  [R-REP-05 / E2-14]')
+check(/rows: rows, lanes: lanes, amendments: amendments \}/.test(src), 'the build node carries the lane record out with its rows  [R-REP-05]')
+check(/Amendments: \$\{JSON\.stringify\(build\.amendments/.test(src), 'and the report prompt is handed the amendments  [E2-13]')
+check(/ACCEPTANCE CRITERIA THAT COULD NOT BE MET/.test(src), 'which it must state in its own section  [E2-13]')
+check(/Lanes\.release/.test(src), 'and whether the worktrees were actually released  [E2-08]')
+check(/amendments: \{/.test(src), 'and a developer proposes a contract amendment rather than editing the issue  [E2-13]')
+check(/THAT FILE IS READ-ONLY TO YOU/.test(src), 'the developer is told the acceptance criteria are read-only to it  [E2-13]')
 check(/`Lanes: \$\{JSON\.stringify\(build\.lanes\)\}/.test(src), 'and the report prompt is handed it  [R-REP-05]')
 check(/\(2b\) \[R-REP-05\] how the slices were BUILT/.test(src), 'which is told to state it, in its own numbered section  [R-REP-05]')
 check(/never omitted/.test(src) && /commands\.install/.test(src), 'either way — including naming the config change that would open the lanes  [R-REP-05]')
@@ -538,7 +546,11 @@ await probe('developer vanishes', async () => {
   })
   const r = await E.buildSlices(E.NODES.build)
   check(!!r, 'buildSlices survives a developer that stops returning  [C2]')
-  check(r.slices.escalated.length === 1 && r.slices.escalated[0].reason === 'no-commit', `it escalates as no-commit, not tester-red (got '${r.slices.escalated[0] && r.slices.escalated[0].reason}')  [R-BUILD-02]`)
+  // [E2-05] A developer that returns NOTHING is a transport failure, not a developer who tried and
+  // could not commit. They used to share one reason and one defect record; the next attempt was then
+  // told "the checkers refuted your previous attempt" over a dropped connection.
+  check(r.slices.escalated.length === 1 && r.slices.escalated[0].reason === 'developer-silent', `a silent developer escalates as developer-silent, not tester-red (got '${r.slices.escalated[0] && r.slices.escalated[0].reason}')  [R-BUILD-02 / E2-05]`)
+  check((r.slices.escalated[0].defects || []).every((d) => d.harness === true), 'and its defect is a HARNESS defect, so no developer is asked to repair a dropped connection  [E2-05]')
   check(r.slices.shipped.length === 0, 'nothing is recorded as shipped without a commit to point at  [R-BUILD-01]')
 })
 
@@ -869,9 +881,192 @@ await probe('E-10 severity anchoring and veto scope', async () => {
   check(r.verdict === 'pass' && r.rounds === 1, `a clean score with one high defect passes in round 1 (got '${r.verdict}' in ${r.rounds})  [E-10]`)
 })
 
-// P18 — [E-01] the plateau exit stops a node that is not converging, and still hands off exactly
-// one arbitration rather than returning a pass.
-await probe('E-01 plateau exit', async () => {
+// P22 — [E2-06] The po cannot declare "no UI stories" while queueing UI slices, and a slice
+// marked ui:true never builds against a ux node that was gated off.
+await probe('E2-06 hasUiStories is enforced', async () => {
+  const M = engine({ agent: async () => ({}) })
+  const node = M.NODES.po
+  const contradiction = M.auditMaker(node, {
+    ok: true,
+    artifacts: [{ path: '.sdlc2/features/demo/feature.md' }],
+    hasUiStories: false,
+    slices: [{ id: '01-a', path: 'x', title: 'A', ui: true }, { id: '02-b', path: 'y', title: 'B', ui: false }],
+  })
+  check(contradiction.length === 1, `a po that queues a ui slice while declaring no screens is a defect (got ${contradiction.length})  [E2-06]`)
+  check(contradiction[0].severity === 'critical', 'and it is critical — the maker contradicted itself  [E2-06]')
+  const consistent = M.auditMaker(node, {
+    ok: true,
+    artifacts: [{ path: '.sdlc2/features/demo/feature.md' }],
+    hasUiStories: false,
+    slices: [{ id: '01-a', path: 'x', title: 'A', ui: false }],
+  })
+  check(consistent.length === 0, 'a genuinely backend-only feature is untouched, and owes no mockup  [E-11]')
+
+  // A ui slice must not build when ux was gated off — it used to sail through, because
+  // blocksSuccessors deliberately returns false for a gated node.
+  const E = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: true }] }
+      if (L.startsWith('build:')) return { committed: true, sha: 'a1', branch: 'slice/demo/01-a' }
+      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
+      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      return {}
+    },
+  })
+  E.settle('ux', { node: 'ux', verdict: 'skipped', gated: true, reason: 'gate condition not met' })
+  const r = await E.buildSlices(E.NODES.build)
+  check(r.slices.skipped.length === 1 && r.slices.skipped[0].reason === 'ux-gated-off-but-slice-is-ui',
+    `a ui slice is not built against a ux node that never ran (got '${r.slices.skipped[0] && r.slices.skipped[0].reason}')  [E2-06]`)
+  check(r.slices.shipped.length === 0, 'and nothing shipped from it  [E2-06]')
+})
+
+// P23 — [E2-16] a slice cut from one of several blockers tells its reviewer which commits are
+// not its work; [E2-07] and the build loop now carries scores across attempts.
+await probe('E2-16 / E2-07 build-loop prompts', async () => {
+  const M = engine({ agent: async () => ({}) })
+  const sl = { id: '07-g', path: 'issues/07-g.md', title: 'G', dir: '', blockedBy: ['02-b', '05-e'] }
+  const withOthers = M.reviewerPrompt(sl, { commands: { test: 't' }, seam: {} }, 'slice/demo/05-e', '', ['slice/demo/02-b'], 'CR-CLEAN: 0.4 — naming')
+  check(/slice\/demo\/02-b/.test(withOthers), 'the reviewer is told which merged-in branches are not this slice  [E2-16]')
+  check(/NOT this\n?\s*slice's work/.test(withOthers), 'and why they are in its diff  [E2-16]')
+  check(/HOW THE PREVIOUS ATTEMPT SCORED/.test(withOthers), 'and how the last attempt scored it  [E2-07]')
+  check(!/Default to FAIL/.test(withOthers), 'a SCORING reviewer is never told to default to FAIL  [E2-04]')
+  const alone = M.reviewerPrompt(sl, { commands: { test: 't' }, seam: {} }, 'main', '', [], '')
+  check(!/merged the following in/.test(alone), 'a single-blocker slice gets no such paragraph  [E2-16]')
+  check(!/HOW THE PREVIOUS ATTEMPT SCORED/.test(alone), 'and attempt 1 is not told about a previous attempt  [E2-07]')
+  const dev = M.developerPrompt(sl, { commands: { test: 't' }, seam: {} }, [], 2, 5, 'main', '', 'CR-DUP: 0.3 — copy-paste')
+  check(/HOW THE LAST ATTEMPT SCORED YOU/.test(dev), 'the developer learns which criterion cost it the attempt  [E2-07]')
+  check(/THAT FILE IS READ-ONLY TO YOU/.test(dev), 'and that the acceptance criteria are not its to edit  [E2-13]')
+})
+
+// P24 — [E2-02] the project declares its stack, and every persona prompt carries it.
+await probe('E2-02 the stack is the project\'s to declare', async () => {
+  const M = engine({
+    agent: async () => ({}),
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { stack: 'Rust 1.79, axum, cargo test', commands: { test: 'cargo test' }, seam: {} }, configByDir: {} },
+  })
+  const mk = M.makerPrompt(M.NODES.architect, 1, [], '')
+  check(/Rust 1\.79, axum, cargo test/.test(mk), 'the declared stack reaches the maker  [E2-02]')
+  const ck = M.checkerPrompt(M.NODES.architect, M.NODES.architect.checkers[0], 1, '')
+  check(/Rust 1\.79, axum, cargo test/.test(ck), 'and the checker, which scores idiom against it  [E2-02]')
+  check(/THE SEED IS SETTLED WORK/.test(mk), 'the maker is told to carry the grilled seed forward, not re-derive it  [E2-15]')
+  check(/SETTLED work agreed with a human/.test(ck), 'and the checker scores fidelity to it, not agreement with it  [E2-15]')
+  const bare = engine({ agent: async () => ({}), args: { feature: 'd', runId: 'r', config: { commands: { test: 't' }, seam: {} }, configByDir: {} } })
+  check(/never assume one/.test(bare.makerPrompt(bare.NODES.architect, 1, [], '')), 'and an undeclared stack is stated as undeclared, never guessed  [E2-02]')
+})
+
+// P25 — [E2-11 / E2-12] The run states its plan before spending anything, and surfaces what an
+// earlier step already refuted about that plan.
+await probe('E2-11 / E2-12 the plan is stated first', async () => {
+  const M = engine({ agent: async () => ({}) })
+  const plan = M.planLines().join('\n')
+  check(/THE PLAN/.test(plan), 'the run prints a plan before the first agent  [E2-11]')
+  for (const id of ['po', 'architect', 'ux', 'build']) {
+    check(plan.includes(M.NODES[id].phase), `the plan names the ${id} step by its phase  [E2-11]`)
+  }
+  check(/product-owner-critic/.test(plan), 'and who checks each step  [E2-11]')
+  check(/Worst case: \d+ agent calls before building starts, then up to \d+ per slice/.test(plan),
+    'the call count is computed from NODES, so editing the graph cannot leave it stale  [E2-11]')
+
+  const table = M.sliceTableLines(
+    [{ id: '01-a', title: 'Hold a list', dir: '', ui: true, blockedBy: [] },
+     { id: '02-b', title: 'Remove one', dir: '', ui: false, blockedBy: ['01-a'] }],
+    { '01-a': 0, '02-b': 1 }
+  ).join('\n')
+  check(/Waits for/.test(table) && !/blockedBy/.test(table), 'the slice table uses plain headings, not field names  [E2-11]')
+  check(/Screens/.test(table) && /Wave/.test(table) && /Test command/.test(table), 'and states screens, wave and test command per slice  [E2-11]')
+  check(/02-b\s+Remove one\s+no\s+01-a/.test(table), 'a blocked slice shows what it waits for  [E2-11]')
+
+  // [E2-12] a dispute raised by a settled node reaches the human before the build acts on it
+  check(M.upstreamDisputes().length === 0, 'no disputes, no noise  [E2-12]')
+  M.results.architect = { node: 'architect', verdict: 'pass', disputed: [{ criterion: 'AR-QUEUE', why: 'issue 06 drives a control issue 03 introduces' }] }
+  const d = M.upstreamDisputes().join('\n')
+  check(/unresolved dispute/.test(d), 'a dispute from an earlier step is surfaced  [E2-12]')
+  check(/issue 06 drives a control issue 03 introduces/.test(d), 'with what it actually said  [E2-12]')
+  check(/architect disputes AR-QUEUE/.test(d), 'and which step raised it  [E2-12]')
+  delete M.results.architect
+})
+
+// P26 — [E2-08] the worktree release is verified, not assumed.
+await probe('E2-08 the release is read', async () => {
+  let asked = null
+  const E = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test', install: 'npm ci' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (L.startsWith('slices:resolve')) return { slices: [
+        { id: '01-a', path: 'i/01.md', title: 'A', dir: '', blockedBy: [] },
+        { id: '02-b', path: 'i/02.md', title: 'B', dir: '', blockedBy: [] },
+      ] }
+      if (L === 'worktrees:release') { asked = { prompt: p, schema: o.schema }; return { released: false, remaining: ['../.sdlc2-worktrees/demo-r/02-b'], branches: true } }
+      if (L.startsWith('build:')) return { committed: true, sha: 'a1', branch: 'slice/demo/x' }
+      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
+      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      return {}
+    },
+  })
+  const r = await E.buildSlices(E.NODES.build)
+  check(!!asked, 'the worktrees are released  [E-07]')
+  check(!!(asked && asked.schema), 'and the release answers with a structured verdict, not prose  [E2-08]')
+  const rel = r.slices.lanes.release
+  check(!!rel, 'whose answer the engine keeps  [E2-08]')
+  check(rel && rel.released === false, 'a release that did not finish is recorded as unfinished  [E2-08]')
+  check(!!(rel && (rel.remaining || []).length), 'naming what is still there  [E2-08]')
+})
+
+// P21 — [E2-14] A slice starts when ITS OWN blockers land, not when its whole level does.
+// Behavioural, not a grep: 03-slow parks until 02-b is observed starting. Under the old level
+// barrier 02-b could not start until 03-slow finished, so the gate would never open and the
+// fallback timer would fire with `bStarted` still false.
+await probe('E2-14 per-slice readiness', async () => {
+  let bStarted = false
+  let bStartedBeforeSlowFinished = false
+  let openGate = null
+  const gate = new Promise((r) => { openGate = r })
+  const fallback = new Promise((r) => setTimeout(r, 1500))
+
+  const E = engine({
+    parallel: parallelReal,
+    args: {
+      feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main',
+      config: { commands: { test: 'npm test', install: 'npm ci' }, seam: {} }, configByDir: {},
+    },
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (L.startsWith('slices:resolve')) {
+        return { slices: [
+          { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] },
+          { id: '03-slow', path: 'issues/03-slow.md', title: 'Slow', dir: '', blockedBy: [] },
+          { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] },
+        ] }
+      }
+      if (L.startsWith('build:02-b')) { bStarted = true; openGate() }
+      if (L.startsWith('build:03-slow')) {
+        await Promise.race([gate, fallback])
+        bStartedBeforeSlowFinished = bStarted
+      }
+      if (L.startsWith('build:')) return { committed: true, sha: 'a1b2c3', branch: 'slice/demo/x' }
+      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
+      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      return {}
+    },
+  })
+  const r = await E.buildSlices(E.NODES.build)
+  check(bStarted === true, 'the blocked slice did start  [E2-14]')
+  check(bStartedBeforeSlowFinished === true, 'and it started while an unrelated sibling was still building — no level barrier  [E2-14]')
+  check(r.slices.shipped.length === 3, `all three slices still ship (${r.slices.shipped.length})  [E2-14]`)
+})
+
+// P18 — [E2-03] The plateau exit is GONE, and a rejected maker output gets one free re-make.
+// The old probe here asserted the plateau exit by giving a document node 9 rounds — which is the
+// only reason it passed. In production `runLoop` is reached only by po/architect/ux, all at
+// DOC_ROUNDS = 2, so three rounds of history could never accumulate and the branch was dead.
+// What replaces it: the round budget now means two SCORED rounds.
+await probe('E2-03 free re-make, no plateau exit', async () => {
+  // (a) A node that never converges spends exactly its declared rounds and then arbitrates.
   let makes = 0
   const E = engine({
     parallel: parallelReal,
@@ -882,12 +1077,48 @@ await probe('E-01 plateau exit', async () => {
       return { pass: false, criteria: E.RUBRICS.arch.criteria.map((c) => ({ id: c.id, score: 0.5 })), defects: [{ criterion: 'AR-BOUND', severity: 'critical', location: 'x', evidence: 'q', fix: 'f' }] }
     },
   })
-  // Give the node more rounds than the plateau needs, so the BREAK is what ends it, not the cap.
-  const node = Object.assign({}, E.NODES.architect, { rounds: 9 })
-  const r = await E.runLoop(node)
-  check(r.verdict === 'needs-arbitration', `a flat node hands off rather than passing (got '${r.verdict}')  [E-01]`)
-  check(r.rounds === 3 && makes === 3, `and stops at round 3 instead of burning 9 (rounds=${r.rounds}, makers=${makes})  [E-01]`)
-  check(r.history.length === 3, 'the score history records every round it did spend  [R-LOOP-09]')
+  const r = await E.runLoop(E.NODES.architect)
+  check(r.verdict === 'needs-arbitration', `a flat node hands off rather than passing (got '${r.verdict}')  [R-LOOP-07]`)
+  check(r.rounds === 2 && makes === 2, `and spends exactly DOC_ROUNDS, no plateau short-circuit (rounds=${r.rounds}, makers=${makes})  [E2-03]`)
+  check(r.history.length === 2, 'the score history records every round it did spend  [R-LOOP-09]')
+  check(!/if \(history\.length >= 3\)/.test(src), 'no plateau-exit branch survives in the engine  [E2-03]')
+
+  // (b) The FIRST rejected maker output is free; the round is not charged.
+  let m2 = 0
+  const E2 = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      if (isMake(o)) {
+        m2++
+        // Round 1's answer names no artifact at all → auditMaker rejects it. Everything after is good.
+        if (m2 === 1) return { ok: true, artifacts: [], hasUiStories: true }
+        return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/design.md' }], hasUiStories: true }
+      }
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: true, criteria: E2.RUBRICS.arch.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+    },
+  })
+  const r2 = await E2.runLoop(E2.NODES.architect)
+  check(r2.verdict === 'pass', `a node whose first output was rejected can still pass (got '${r2.verdict}')  [E2-03]`)
+  check(r2.rounds === 1, `and the rejected attempt did not cost a round (rounds=${r2.rounds}, makers=${m2})  [E2-03]`)
+  check(m2 === 2, `the maker really was re-spawned (${m2} maker calls)  [E2-03]`)
+  check((r2.history[0] || {}).free === true, 'the free re-make is recorded in the history, not hidden  [R-LOOP-09]')
+
+  // (c) The free re-make is bounded: a maker that ALWAYS answers badly still terminates.
+  let m3 = 0
+  const E3 = engine({
+    parallel: parallelReal,
+    args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test' }, seam: {} }, configByDir: {} },
+    agent: async (p, o) => {
+      if (isMake(o)) { m3++; return { ok: true, artifacts: [], hasUiStories: true } }
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: true, criteria: [], defects: [] }
+    },
+  })
+  const r3 = await E3.runLoop(E3.NODES.architect)
+  check(r3.verdict === 'hard-fail', `a maker that never produces artifacts still hard-fails (got '${r3.verdict}')  [E2-03]`)
+  check(m3 === 3, `bounded at DOC_ROUNDS + 1 free re-make, not infinite (${m3} maker calls)  [E2-03]`)
 })
 
 // P18b — [SD-05 / R-LOOP-11] a spawn that never answered is transport, not content. It retries

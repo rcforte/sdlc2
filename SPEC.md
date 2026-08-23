@@ -456,16 +456,25 @@ It cannot prove the graph produces good software — the first real run is that 
    wording, where the global lookalike says `CONTEXT.md` and "the Feature Brief". Resolution
    probes should discriminate like this; a probe that only proves *a* name resolves cannot tell
    the two apart.
-3. **No executable oracle above `build`.** `po`, `architect` and `ux` are LLM judging LLM. MIN +
-   severity veto + fresh context reduce rubber-stamping; they do not eliminate it. v0.1.3 gives the
+3. **No executable oracle above `build`.** `po`, `architect` and `ux` are LLM judging LLM. The
+   severity veto and fresh context reduce rubber-stamping; they do not eliminate it. **The MIN
+   across checkers is not currently one of these defences and should not be counted as one**
+   (`[E2-09]`): every node in the shipped graph declares exactly ONE scoring checker, so the
+   minimum is taken over a single number. MIN is what makes a panel weakest-link *when there is a
+   panel*; adding a second lens to a node is an open, costed question, not something the graph
+   does today. v0.1.3 gives the
    checker last round's scores (`[E-05]`), which trades a little independence across rounds for
    stability — mutual blindness *within* a round is untouched (`[R-LOOP-03]`). And a document
    arbiter still finalizes artifacts that nothing re-checks: the `build` arbiter was stopped from
    committing (`[R-BUILD-01]`), but above `build` there is no oracle to re-run, so that residual
    stands and is the human's to catch at merge.
 4. **Cost.** Worst case ≈ (2 maker + 2 checker) × 3 doc nodes + (5 dev + 5 tester + 5 reviewer) ×
-   N slices. The document nodes dropped from 5 rounds to 2 in v0.1.3, the plateau exit can end one
-   sooner, and arbiters came down from `opus`/`max` to `opus`/`high`. The executor stops taking
+   N slices. The document nodes dropped from 5 rounds to 2 in v0.1.3 and arbiters came down from
+   `opus`/`max` to `opus`/`high`. **The plateau exit that used to be claimed here was deleted in
+   v0.1.6** (`[E2-03]`): it required three rounds of history to detect a flat run, and the same
+   change that added it cut document nodes to two rounds, so it could never fire. It never saved
+   anything. What replaced it is a free re-make — a maker output rejected before it could be scored
+   no longer costs a round, so two rounds now means two *scored* rounds. The executor stops taking
    **any** new node — doc nodes included — under ~60k remaining budget, and records the skip; it
    does not stop a node already in flight, so the ceiling can still be overrun by one node's worth
    of work.

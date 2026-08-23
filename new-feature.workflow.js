@@ -47,7 +47,7 @@ const REPORT = `${DIR}/runs/${RUN_ID}.md`
 // the repository, as a sibling of it. Two earlier locations were wrong for two different reasons:
 // under `${DIR}` the report node would sweep a worktree into the paperwork commit, and under
 // `.sdlc2/worktrees/` — anywhere inside the repo — a worktree is invisible to git (gitignored) but
-// still perfectly visible to the project's own TEST RUNNER. Measured in the lab: vitest collected
+// still perfectly visible to the project's own TEST RUNNER. Measured during development: vitest collected
 // three sibling worktrees' suites from the main checkout and rendered every component against a
 // second copy of React — 16 files, 98 failures, all `Invalid hook call`. Gitignoring them was only
 // half the decision; a checkout of this repo is one project, not N+1. A path outside the repo
@@ -222,6 +222,18 @@ const SLICES = {
   },
 }
 
+// [E2-08] The worktree release used to return prose nobody read. It is a verdict like any other.
+const RELEASE = {
+  type: 'object',
+  required: ['released'],
+  properties: {
+    released: { type: 'boolean' }, // git worktree list shows the main checkout ALONE
+    remaining: { type: 'array', items: { type: 'string' } },
+    branches: { type: 'boolean' }, // every slice branch still present
+    notes: { type: 'string' },
+  },
+}
+
 const BUILD = {
   type: 'object',
   required: ['committed'],
@@ -230,6 +242,23 @@ const BUILD = {
     sha: { type: 'string' },
     branch: { type: 'string' },
     changelog: { type: 'string' },
+    // [E2-13] Where a developer says "this acceptance criterion cannot be met on this branch".
+    // In run 3 one edited the issue file instead, narrowing the scenario it was about to be judged
+    // against. It did so well — options weighed, debt named, a human paid it — but the tester reads
+    // those criteria FROM that file, so an honest narrowing and a quiet deletion produce the same
+    // green from the same inputs. The contract is now proposed against, never rewritten in place.
+    amendments: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['criterion', 'why', 'owed'],
+        properties: {
+          criterion: { type: 'string' }, // the scenario or AC that cannot be executed here
+          why: { type: 'string' }, // what about THIS branch makes it impossible
+          owed: { type: 'string' }, // what must be asserted later, and where it must land
+        },
+      },
+    },
     notes: { type: 'string' },
   },
 }
@@ -555,6 +584,21 @@ function auditMaker(node, maker) {
       out.push(engineDefect(o.path, `maker returned artifacts ${JSON.stringify(claimed)} — ${o.path} is not among them`, `write ${o.path} and return its path in \`artifacts\``))
     }
   }
+  // [E2-06] The one contradiction the engine CAN see without reading the disk. `hasUiStories`
+  // gates the whole `ux` node, and it was called unenforceable for two releases — but since [E-13]
+  // the po also returns a slice manifest with a `ui` flag per slice, so both halves arrive in the
+  // same object. A maker that queues a UI slice while declaring the feature has no screens has
+  // contradicted itself, which is `critical` by this engine's own severity anchor.
+  if (maker.hasUiStories === false && Array.isArray(maker.slices)) {
+    const uiSlices = maker.slices.filter((x) => x && x.ui === true).map((x) => x.id)
+    if (uiSlices.length) {
+      out.push(engineDefect(
+        node.id,
+        `hasUiStories is false, but the slice manifest marks ${uiSlices.length} slice(s) as ui:true — ${uiSlices.join(', ')}`,
+        'set hasUiStories true if any slice renders a screen, or mark those slices ui:false if they do not — the two must agree [E2-06]'
+      ))
+    }
+  }
   const lines = String(maker.changelog || '').split('\n').length
   if (lines > 20) {
     out.push(engineDefect(node.id, `changelog is ${lines} lines long`, 'return at most 20 lines of changelog and never an artifact body [R-CTX-06]', 'high'))
@@ -584,7 +628,9 @@ function configFor(dir) {
   if (!best) return CONFIG
   const cmds = Object.assign({}, CONFIG.commands || {}, best.commands || {})
   const seam = Object.assign({}, CONFIG.seam || {}, best.seam || {})
-  return { commands: cmds, seam: seam }
+  // [E2-02] A nested block may declare its own stack — a `frontend/` directory in a repo whose
+  // root is a JVM service is exactly the case per-directory config exists for.
+  return { commands: cmds, seam: seam, stack: best.stack || CONFIG.stack || '' }
 }
 
 // Doc nodes reason about the whole repo, so they are shown the per-directory overrides too — a
@@ -604,8 +650,15 @@ function overrides() {
 function conventions(cfg, withOverrides) {
   const c = cfg.commands || {}
   const s = cfg.seam || {}
+  // [E2-02] The stack the project actually uses, declared by the project. The personas used to
+  // carry one in their own identity — "Java 21 + Spring Boot backend and React 19 + TypeScript
+  // frontend" — which made every judgement about idiom, test seam and framework fit assume a
+  // stack sdlc2 has no business assuming. Commands were already the project's to declare; this
+  // makes the language the same kind of fact.
+  const stack = String(cfg.stack || CONFIG.stack || '').trim()
   return (
     `PROJECT CONVENTIONS (from the project's CLAUDE.md sdlc2 block — authoritative, do not guess):\n` +
+    `  stack        : ${stack || '(not declared — infer it from the code you read, and never assume one)'}\n` +
     `  test command : ${c.test || '(none — STOP, there is no oracle)'}\n` +
     (c.build ? `  build        : ${c.build}\n` : '') +
     (c.run ? `  run          : ${c.run}\n` : '') +
@@ -661,6 +714,15 @@ function makerPrompt(node, round, defects, extra) {
     `You are the \`${node.maker.agent}\` persona working on the feature "${TITLE}" (slug: ${FEATURE}).\n\n` +
     `MANDATE — ${node.mandate}\n` +
     repair +
+    // [E2-15] The seed arrives already grilled: its capability, scope, exclusions, decisions,
+    // ubiquitous language and open questions were settled with a human before the graph started.
+    // Measured on run 3, the document phase cost 42 minutes — 30% of the wall clock — much of it
+    // re-deriving those decisions and then being scored on whether the re-derivation matched.
+    `\nTHE SEED IS SETTLED WORK, NOT A PROMPT. Where ${SEED} already decides something — scope, an\n` +
+    `exclusion, a term, a constraint — CARRY IT FORWARD verbatim rather than re-deriving it or\n` +
+    `improving on it. Re-opening a settled decision is not thoroughness here; it is the single\n` +
+    `most expensive thing you can do, and the rubric scores you on traceability to the seed, not\n` +
+    `on independent agreement with it. Spend your rounds on what the seed leaves OPEN.\n` +
     `\nREAD THESE PATHS (they exist on disk; nothing is pasted for you):\n` +
     pathList(node.inputs.concat([VH])) +
     `\n  (${VH} — if it exists, these are decisions already taken under caveat. Honour them; do not relitigate.)\n` +
@@ -691,6 +753,11 @@ function checkerPrompt(node, checker, round, prior) {
         `Your lens: ${checker.lens}.\n`) +
     `You are READ-ONLY: never edit an artifact. You have not seen any other checker's verdict and\n` +
     `must not speculate about one.\n` +
+    // [E2-15] The checker's counterpart to the maker's instruction above.
+    `The seed at ${SEED} is SETTLED work agreed with a human before this run. Score whether the\n` +
+    `artifact CARRIES its decisions faithfully — a decision dropped, contradicted or silently\n` +
+    `re-opened is a defect. Disagreeing with a settled decision is not: if you think one is wrong,\n` +
+    `that is a human-verify note, never a score deduction.\n` +
     `\nROUND ${round}. The maker was asked to: ${node.mandate}\n` +
     // [E-05] From round 2 the checker sees how the PREVIOUS round scored. Without this a fresh,
     // memoryless judge re-scores all criteria cold every round, so a criterion that was clean can
@@ -776,6 +843,13 @@ async function runLoop(node) {
   let prevScores = '' // [E-02/E-05] last round's per-criterion scores; '' on round 1
   let score = 0
   let round = 0
+  // [E2-03] A maker whose OUTPUT was rejected — `ok: false`, or a declared artifact it never wrote
+  // — has produced nothing a checker could score, so the node learns nothing from the round and
+  // used to pay half its budget for it. Run 3's `architect` had round 1 rejected this way and
+  // passed on its only remaining scored attempt. Same principle as [SD-05]: what was never judged
+  // is not a judgement. One free re-make per node, then it costs a round like anything else —
+  // otherwise a maker that always answers badly would never terminate.
+  let freeRemakes = 1
   // Per-round scores, so a node that burns its whole round budget can be read afterwards. A score that
   // climbs is convergence that ran out of budget; one that flatlines or oscillates is thrash, and
   // the two want opposite fixes. Only the FINAL score used to survive into the report, which is
@@ -813,6 +887,14 @@ async function runLoop(node) {
     const makerFaults = auditMaker(node, maker)
     if (makerFaults.length) {
       defects = makerFaults
+      // [E2-03] The first rejection of the run is free: nothing was scored, so nothing was learned.
+      if (freeRemakes > 0) {
+        freeRemakes--
+        round--
+        history.push({ round: round + 1, score: null, defects: makerFaults.length, open: makerFaults.length, note: 'maker output rejected — free re-make, round not charged', free: true })
+        log(`${label}: maker output rejected — ${makerFaults.map((d) => d.evidence).join('; ')}. Re-making once free; the round is NOT charged.`)
+        continue
+      }
       history.push({ round: round, score: null, defects: makerFaults.length, open: makerFaults.length, note: 'maker output rejected' })
       log(`${label} round ${round}/${node.rounds}: maker output rejected — ${makerFaults.map((d) => d.evidence).join('; ')}`)
       continue
@@ -887,19 +969,12 @@ async function runLoop(node) {
       return { node: node.id, verdict: 'hard-fail', score: score, rounds: round, defects: defects, maker: lastGoodMaker, history: history, reason: 'binary checker still failing' }
     }
 
-    // [E-01] Plateau exit. Two further rounds that move neither the score nor the open-defect
-    // count are not converging on anything: they buy a maker and a full checker panel that cannot
-    // change where this node ends up. Falling out of the loop reaches the SAME `needs-arbitration`
-    // return below, so [R-LOOP-07] still gets exactly one arbiter call.
-    if (history.length >= 3) {
-      const h = history.slice(-3)
-      const stuck = (x, y) =>
-        x.score !== null && y.score !== null && y.score <= x.score + 0.03 && y.open >= x.open
-      if (stuck(h[0], h[1]) && stuck(h[1], h[2])) {
-        log(`${label}: score and open defects flat across 3 rounds — arbitrating now rather than spending the remaining ${node.rounds - round}.`)
-        break
-      }
-    }
+    // [E2-03] The plateau exit lived here and was DELETED. It required three rounds of history to
+    // detect a flat run, and E-01 cut the document nodes to two in the same change that added it,
+    // so it could never fire: `runLoop` is reached only by `po`, `architect` and `ux`, all at
+    // DOC_ROUNDS. It was dead from the day it shipped, and two documents claimed a saving it never
+    // delivered. What replaced its intent is the free re-make above: the budget is now two SCORED
+    // rounds, which is what makes two rounds enough.
   }
 
   // Nothing to arbitrate over: no round ever produced the declared artifacts, so a "best
@@ -962,7 +1037,7 @@ function baseFor(slice, branchOf, order) {
   return branchOf[shippedBlockers[shippedBlockers.length - 1]]
 }
 
-function developerPrompt(slice, cfg, defects, attempt, rounds, base, wt) {
+function developerPrompt(slice, cfg, defects, attempt, rounds, base, wt, prevScores) {
   const install = String((cfg.commands || {}).install || '').trim()
   const real = actionable(defects)
   const stalled = harnessOnly(defects)
@@ -983,10 +1058,21 @@ function developerPrompt(slice, cfg, defects, attempt, rounds, base, wt) {
     `declared seam; keep it red while inner red-green-refactor cycles drive it green.\n` +
     repair +
     `\nREAD:\n  - ${slice.path}   (the issue — its \`## Acceptance criteria\` Gherkin IS the contract)\n` +
+    // [E2-13] The contract is read-only to the party being judged.
+    `      THAT FILE IS READ-ONLY TO YOU. Never edit it, never narrow a scenario, never delete a\n` +
+    `      step — the tester scores you against it, so editing it moves your own bar. If a\n` +
+    `      criterion genuinely CANNOT be executed on this branch (it drives a control another\n` +
+    `      slice introduces, say), do not shrink it and do not ship it as an unexecuted todo:\n` +
+    `      report it in \`amendments\` with the criterion, why this branch cannot run it, and what\n` +
+    `      is owed and where it must land. That is a real outcome the engine records; a quiet\n` +
+    `      rewrite is indistinguishable from deleting the assertion that would not go green.\n` +
     `  - ${SEED}\n  - ${DESIGN}   (the architecture, and the seam named for THIS slice)\n` +
     `  - ${MOCKUP}   (frontend work: match its structure, states and controls — not its CSS)\n` +
     `  - ${VH}   (if present — decisions already taken under caveat)\n` +
     `\n${conventions(cfg)}` +
+    // [E2-07] Which criterion actually cost the last attempt. Without it a developer on attempt 4
+    // sees the surviving defects and never learns which rubric line it is losing on.
+    (prevScores ? `\nHOW THE LAST ATTEMPT SCORED YOU (criterion: score — why):\n${prevScores}\n` : '') +
     `\nYOU OWN GIT FOR THIS SLICE — the isolation invariant is non-negotiable, and the tester\n` +
     `asserts it with real git commands before it looks at anything else:\n` +
     (wt
@@ -1021,6 +1107,8 @@ function developerPrompt(slice, cfg, defects, attempt, rounds, base, wt) {
   )
 }
 
+// [E2-13] The tester's contract is the issue as WRITTEN. A criterion it cannot execute is a
+// finding, never a criterion to quietly drop.
 function testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt) {
   // [E-07] When the slice was built in its own worktree, every git command and the test command
   // itself must target THAT tree. `[R-BUILD-07]` is unchanged in substance: the developer, the
@@ -1072,12 +1160,19 @@ function testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt) {
   )
 }
 
-function reviewerPrompt(slice, cfg, base, wt) {
+function reviewerPrompt(slice, cfg, base, wt, alsoContains, prior) {
   const g = wt ? `git -C ${wt}` : 'git' // [E-07] — as the tester; same tree, read-only
   return (
     `You are the \`sdlc2-code-reviewer\` persona reviewing the code of slice ${slice.id}.\n\n` +
     `MANDATE — REFUTE the quality of this code. You judge craft, not whether it works (the tester\n` +
-    `owns that). Every finding cites file:line and a NAMED principle. Default to FAIL when unsure.\n` +
+    `owns that). Every finding cites file:line and a NAMED principle.\n` +
+    // [E2-04] "Default to FAIL when unsure" used to sit here. It belongs to a BINARY checker whose
+    // ground truth is executable; this one SCORES, and for a scorer it silently drags every
+    // criterion it did not fully examine downward. E-03 removed it from `checkerPrompt` and from
+    // all four scoring personas and missed this hand-written prompt, which then contradicted
+    // `agents/sdlc2-code-reviewer.md` for two releases.
+    `Score what you can evidence, and do not penalise the developer for what you did not check.\n` +
+    `A clean pass with zero defects is a legitimate verdict — say so when you find one.\n` +
     `You are READ-ONLY and you have not seen the tester's verdict.\n` +
     `\nREAD: the diff of branch 'slice/${FEATURE}/${slice.id}' against '${base}'\n` +
     `  (\`${g} diff ${base}...slice/${FEATURE}/${slice.id}\`), plus ${slice.path} and ${DESIGN}.\n` +
@@ -1086,9 +1181,29 @@ function reviewerPrompt(slice, cfg, base, wt) {
       : `This slice is stacked on '${base}' because it is blocked by it. Diff against '${base}',\n` +
         `NOT against '${BASE}': the blocker's code is context you have already reviewed, and\n` +
         `re-reporting it as this slice's work wastes the round.\n`) +
+    // [E2-16] `baseFor` cuts a slice from ONE blocker, so a slice that declares several has the
+    // others merged into its own branch by the developer — and they are inside `base...branch`.
+    // Run 3's slice 07 declared five blockers, was cut from one, and was scored 0.94 on a diff
+    // holding three other slices' code. The engine already computes this list for the tester; it
+    // simply never told the reviewer.
+    ((alsoContains && alsoContains.length)
+      ? `This slice declares more than one blocker. It was cut from '${base}', and the developer\n` +
+        `merged the following in, so their commits are inside the diff above and are NOT this\n` +
+        `slice's work — each was reviewed on its own branch already:\n` +
+        pathList(alsoContains) +
+        `\nExclude everything reachable from those branches. \`${g} log ${base}..HEAD --no-merges\`\n` +
+        `minus their commits is this slice's actual contribution.\n`
+      : '') +
     `Read-only on git too: \`${g} diff\` / \`${g} show\` / \`${g} log\` only. Never checkout, switch,\n` +
     `stash or reset — the tester is running the suite in this same working tree right now.\n` +
     `\n${conventions(cfg)}` +
+    // [E2-07] The previous attempt's per-criterion scores. E-05 gave document checkers this and
+    // the build loop never got it, even though it runs up to 5 attempts where a doc node runs 2.
+    ((prior)
+      ? `\nHOW THE PREVIOUS ATTEMPT SCORED (the last verdict on this slice, not another checker's):\n${prior}\n` +
+        `Verify each claimed fix with FRESH evidence. You may raise a score freely. Do NOT lower one\n` +
+        `without quoting the regression that justifies it.\n`
+      : '') +
     `\nScore ONLY what this slice changed — pre-existing debt elsewhere is out of scope and\n` +
     `reporting it wastes a round.\n` +
     `\nRUBRIC — score each 0..1 using its anchors; a missing id is scored zero. Do not compute a\n` +
@@ -1197,10 +1312,19 @@ async function buildSlices(node) {
   // Stable sort into dependency order, so `order` (which decides which blocker a stacked slice is
   // cut from) and the build sequence agree with the levels.
   slices.sort((a, b) => levelOf[a.id] - levelOf[b.id])
-  log(`${slices.length} slice(s) queued off ${BASE} in ${Math.max.apply(null, slices.map((x) => levelOf[x.id])) + 1} dependency level(s), stacking any slice on the blocker it declares.`)
+  log(`${slices.length} slice(s) queued off ${BASE} in ${Math.max.apply(null, slices.map((x) => levelOf[x.id])) + 1} dependency wave(s), stacking any slice on the blocker it declares.`)
+  // [E2-12] What an already-settled step said about this plan, BEFORE forty agents act on it. In
+  // run 3 the architect correctly refuted issue 06's queue, filed it against the `po` node exactly
+  // as [SD-07] requires — and the build then executed the refuted queue anyway, because the graph
+  // runs forward and nothing reads a dispute. This does not make the graph go backwards. It puts
+  // the finding in front of the person watching, at the one moment acting on it is still free.
+  upstreamDisputes().forEach(log)
+  // [E2-11] The slice table. Every column below is already in memory at this point.
+  sliceTableLines(slices, levelOf).forEach(log)
 
   const shipped = []
   const escalated = []
+  const amendments = [] // [E2-13] acceptance criteria a slice could not execute, and what is owed
   // [E-13] Escalation notes were awaited one at a time inside the slice loop, putting a serial
   // agent round-trip on the critical path for every failure. They are pure side-effect writes to
   // separate issue files, so they are collected here and flushed concurrently once building ends.
@@ -1243,6 +1367,18 @@ async function buildSlices(node) {
     // nodes. The join is per slice now: backend work starts as soon as the architecture lands.
     if (slice.ui === true) {
       const uxResult = await whenSettled('ux')
+      // [E2-06] A GATED ux is the case this join exists for, and it was the one case it let
+      // through: `blocksSuccessors` returns false for a gated node — correct in general, since a
+      // feature with no screens must not block its build — so a slice explicitly marked ui:true
+      // used to build with no state matrix and no mockup, silently. The po's own two answers
+      // disagree; that is not a reason to guess, and it is certainly not a reason to say nothing.
+      if (uxResult && uxResult.gated === true) {
+        log(`Skipping ${slice.id} — it is marked ui:true, but the po set hasUiStories false so the ux node never ran. The two disagree; building a screen against no design is not the way to resolve that. [E2-06]`)
+        skipped.push({ id: slice.id, reason: 'ux-gated-off-but-slice-is-ui' })
+        rows.push({ id: slice.id, attempts: 0, verdict: 'skipped', reason: 'ux-gated-off-but-slice-is-ui' })
+        done[slice.id] = false
+        return
+      }
       if (blocksSuccessors(uxResult)) {
         log(`Skipping ${slice.id} — it is a UI slice and the ux node did not pass.`)
         skipped.push({ id: slice.id, reason: 'ux-not-passed' })
@@ -1270,10 +1406,11 @@ async function buildSlices(node) {
     // What the MOST RECENT attempt actually ended in. The escalation note quotes this, so a slice
     // that never compiled is never reported as a failing test suite.
     let outcome = 'no-commit'
+    let prevScores = '' // [E2-07] last attempt's per-criterion review scores; '' on attempt 1
 
     while (attempt < rounds) {
       attempt++
-      const build = await spawn(developerPrompt(slice, cfg, defects, attempt, rounds, base, wt), {
+      const build = await spawn(developerPrompt(slice, cfg, defects, attempt, rounds, base, wt, prevScores), {
         agentType: at(node.maker.agent),
         model: node.maker.model,
         effort: node.maker.effort,
@@ -1281,21 +1418,41 @@ async function buildSlices(node) {
         label: `build:${slice.id} (${attempt}/${rounds})`,
         phase: node.phase,
       })
-      if (!build || build.committed !== true) {
+      // [E2-05] Two different events used to share this branch: a developer that never ANSWERED
+      // (transport — `spawn` already retried it free and failed) and a developer that answered and
+      // said it could not commit (content). Both produced an ordinary defect, so the next attempt
+      // opened with "the independent checkers refuted the previous attempt" over a dropped
+      // connection. That is the exact failure [SD-05] ended in `runLoop`, one layer down.
+      if (!build) {
+        testerPass = false
+        outcome = 'developer-silent'
+        defects = [harnessDefect(slice.id, 'the developer spawn never answered — a transport failure, already retried once', 're-run the slice')]
+        log(`${slice.id}: the developer spawn never answered (attempt ${attempt}/${rounds}) — recorded as errored, not as a defect in its work. [E2-05]`)
+        continue
+      }
+      if (build.committed !== true) {
         testerPass = false // nothing was tested this round; do not carry a stale green
         outcome = 'no-commit'
-        defects = [engineDefect(slice.id, (build && build.notes) || 'developer did not reach a green commit', 'reach green and commit on the slice branch')]
+        defects = [engineDefect(slice.id, build.notes || 'developer did not reach a green commit', 'reach green and commit on the slice branch')]
         log(`${slice.id}: no commit (attempt ${attempt}/${rounds}).`)
         continue
       }
       lastGood = build
+      // [E2-13] An amendment is a decision about the product contract. It survives into the row and
+      // the report; it is never just a note in a changelog nobody re-reads.
+      if (Array.isArray(build.amendments) && build.amendments.length) {
+        for (const a of build.amendments) {
+          log(`⚠ ${slice.id}: the developer says an acceptance criterion cannot be met on this branch — "${String(a.criterion || '').slice(0, 120)}". Owed: ${String(a.owed || 'not stated').slice(0, 160)} [E2-13]`)
+        }
+        amendments.push({ slice: slice.id, items: build.amendments })
+      }
 
       const verdicts = await parallel([
         () => spawn(testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt), {
           agentType: at(testerRole.agent), model: testerRole.model, effort: testerRole.effort,
           schema: verdictSchema(testerRole), label: `test:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
-        () => spawn(reviewerPrompt(slice, cfg, base, wt), {
+        () => spawn(reviewerPrompt(slice, cfg, base, wt, mustContain, prevScores), {
           agentType: at(reviewRole.agent), model: reviewRole.model, effort: reviewRole.effort,
           schema: verdictSchema(reviewRole), label: `review:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
@@ -1317,6 +1474,7 @@ async function buildSlices(node) {
         log(`${slice.id}: tester returned pass:true alongside ${blockingOpen(testerDefects).length} critical/high defect(s) — treating as RED.`)
       }
       reviewScore = rv ? weightedTotal(node.rubric, rv) : 0
+      prevScores = scoreBrief([rv]) // [E2-07] carried into the next attempt's developer AND reviewer
       const all = dedupe(testerDefects.concat(cleanDefects(rv, `review:${slice.id}`)).concat(missing))
       const open = blockingOpen(all)
 
@@ -1401,7 +1559,12 @@ async function buildSlices(node) {
   // project has not declared `commands.install`, lanes would produce slices that fail for a reason
   // that has nothing to do with the code, so the engine stays sequential and SAYS SO.
   const install = String((CONFIG.commands || {}).install || '').trim()
-  const LANES = install ? 4 : 1
+  // [E2-10] The cap was the bare literal 4, derived from nothing. It is now the project's to set —
+  // `lanes:` in the sdlc2 config block — with 4 as the default. Zero or nonsense falls back rather
+  // than disabling the build.
+  const declaredLanes = Math.floor(Number(CONFIG.lanes))
+  const MAX_LANES = declaredLanes > 0 ? declaredLanes : 4
+  const LANES = install ? MAX_LANES : 1
 
   // Bucket the slices by the levels computed above. A slice whose blocker is unknown lands at
   // level 0, which is safe: the `blockedBy` guard inside runSlice still refuses to build it and
@@ -1422,31 +1585,76 @@ async function buildSlices(node) {
     log(`${widest} slice(s) are independent and could build concurrently, but the project declares no \`commands.install\`; a fresh worktree would have no dependencies to test against. Building sequentially.`)
   }
 
-  for (let lv = 0; lv < levels.length; lv++) {
-    const group = levels[lv] || []
-    if (!group.length) continue
-    if (LANES === 1 || group.length === 1) {
-      // Sequential path — the session's own working tree, exactly as before. [R-BUILD-07]
-      for (const sl of group) await runSlice(sl, '')
-      lanes.batches.push({ level: lv, ids: group.map((x) => x.id), concurrent: false })
+  // [E2-14] Slices are scheduled against THEIR OWN blockers, not against a level. The level loop
+  // that used to live here awaited every slice in a level before starting the next, so a slice
+  // waited on the slowest unrelated sibling rather than on anything it depends on. Measured in run
+  // 3: slice 05 is blocked by 03 and nothing else; 03 landed at 14:46 and 05 started at 15:20, the
+  // minute an unrelated slice 06 finished. 34 of 141 minutes — 24% of the run — bought nothing,
+  // and the waste grows with the width of the graph because a barrier waits on the maximum.
+  //
+  // `levelOf` is kept: it is how the report describes the shape, and it is what `order` sorted by.
+  // It is no longer what the scheduler waits on.
+  const pending = slices.slice()
+  const running = Object.create(null) // id → promise
+  let started = 0
+  // Ready = every declared blocker has SETTLED, either way. A failed or unknown blocker still
+  // counts as settled: runSlice's own guard turns it into a `skipped` row, which is a decision, and
+  // a decision is not something to wait for.
+  const ready = (sl) => (sl.blockedBy || []).every((b) => !known[b] || b in done)
+  const runningCount = () => Object.keys(running).length
+
+  while (pending.length || runningCount()) {
+    let launched = false
+    for (let i = 0; i < pending.length && runningCount() < LANES; ) {
+      const sl = pending[i]
+      if (!ready(sl)) { i++; continue }
+      pending.splice(i, 1)
+      // A slice gets its own worktree only when it may actually share the clock with another. The
+      // sequential path stays the session's own checkout, exactly as before. [R-BUILD-07]
+      const wt = LANES > 1 ? `${WORKTREES}/${sl.id}` : ''
+      const withOthers = runningCount() > 0
+      if (withOthers) lanes.concurrent = true
+      lanes.batches.push({ level: levelOf[sl.id], ids: [sl.id], concurrent: withOthers })
+      log(`▸ starting ${sl.id}${withOthers ? ` alongside ${Object.keys(running).join(', ')}` : ''}${wt ? ' in its own worktree' : ''}.`)
+      started++
+      launched = true
+      const pr = runSlice(sl, wt).then(
+        () => { delete running[sl.id] },
+        (e) => { delete running[sl.id]; log(`${sl.id}: threw — ${(e && e.message) || e}`) }
+      )
+      running[sl.id] = pr
+    }
+    if (!runningCount()) {
+      if (!pending.length) break
+      // Nothing running and nothing ready: every remaining slice is waiting on a blocker that will
+      // never settle — a dependency cycle the level fixpoint could not break. Release them to
+      // runSlice, which records each as `blocker-unknown` or `blocker-failed` rather than hanging.
+      if (!launched) {
+        log(`${pending.length} slice(s) can never become ready — their blockers never settle. Recording them rather than waiting forever.`)
+        for (const sl of pending.splice(0)) await runSlice(sl, '')
+        break
+      }
       continue
     }
-    for (let i = 0; i < group.length; i += LANES) {
-      const batch = group.slice(i, i + LANES)
-      log(`▸ level ${lv}: building ${batch.map((x) => x.id).join(' ∥ ')} in separate worktrees.`)
-      lanes.batches.push({ level: lv, ids: batch.map((x) => x.id), concurrent: batch.length > 1 })
-      if (batch.length > 1) lanes.concurrent = true
-      await parallel(batch.map((sl) => () => runSlice(sl, `${WORKTREES}/${sl.id}`)))
-    }
+    await Promise.race(Object.keys(running).map((k) => running[k]))
   }
 
   // [E-07] Release the worktrees. [SD-04] They live OUTSIDE the repo now, so a stranded one no
   // longer dirties the tree or pollutes the test runner — but it still holds a branch checked out,
   // and the main tree cannot check that branch out while it does. Removing a worktree does not
   // touch its branch: the slice branches are the deliverable and they survive.
-  if (worktrees.length) {
+  //
+  // [E2-08] Two things used to go wrong here and neither could be seen. The agent's answer was
+  // discarded, so a half-done cleanup reported as success; and this call sits after the build loop,
+  // so a throw anywhere above skipped it entirely and stranded every tree created so far. It is now
+  // reached from a finally-equivalent path, and what it says is read.
+  const releaseReport = await releaseWorktrees()
+  if (releaseReport) lanes.release = releaseReport
+
+  async function releaseWorktrees() {
+    if (!worktrees.length) return null
     log(`Releasing ${worktrees.length} slice worktree(s).`)
-    await spawn(
+    const answer = await spawn(
       `Release the sdlc2 slice worktrees for feature "${FEATURE}". For EACH path below run\n` +
         `\`git worktree remove --force <path>\`, then run \`git worktree prune\` once:\n` +
         pathList(worktrees) +
@@ -1457,9 +1665,28 @@ async function buildSlices(node) {
         `\`git branch --list 'slice/${FEATURE}/*'\` that every slice branch is STILL THERE — the\n` +
         `branches are the deliverable; only their working trees are disposable.\n` +
         `Do NOT delete any branch, do not touch '${BASE}', and do not commit anything. If a removal\n` +
-        `fails, say which path and why, and stop rather than forcing anything else.`,
-      { model: 'sonnet', effort: 'low', label: 'worktrees:release', phase: node.phase }
+        `fails, say which path and why, and stop rather than forcing anything else.\n` +
+        `\nReturn the structured RELEASE object: \`released\` true only if \`git worktree list\` now\n` +
+        `shows the main checkout ALONE, \`remaining\` listing any path still there, and \`branches\`\n` +
+        `true only if every slice branch is still present.`,
+      { model: 'sonnet', effort: 'low', schema: RELEASE, label: 'worktrees:release', phase: node.phase }
     )
+    // [E2-08] Read the answer. A release that failed, half-finished, or never replied is a
+    // human-verify item, not a silent success — a stranded worktree holds a branch checked out and
+    // the main tree cannot check that branch out while it does.
+    if (!answer) {
+      log(`⚠ the worktree release never answered. ${worktrees.length} tree(s) may still exist outside the repo — check \`git worktree list\` before the next run. [E2-08]`)
+      return { asked: worktrees.length, released: false, verified: false, note: 'the release agent returned nothing' }
+    }
+    if (answer.released !== true || (answer.remaining || []).length) {
+      log(`⚠ the worktree release did not finish: ${(answer.remaining || []).join(', ') || answer.notes || 'reason not stated'}. [E2-08]`)
+    } else {
+      log(`Worktrees released and verified — only the main checkout remains.`)
+    }
+    if (answer.branches === false) {
+      log(`⚠ the release reports a MISSING slice branch. The branches are the deliverable; the trees were the disposable part. [E2-08]`)
+    }
+    return { asked: worktrees.length, released: answer.released === true, verified: true, remaining: answer.remaining || [], branches: answer.branches !== false, note: answer.notes || null }
   }
 
   // [E-13] Flush the escalation notes concurrently. Each writes a `## Status` note to its own
@@ -1480,8 +1707,76 @@ async function buildSlices(node) {
     verdict: verdict,
     score: null,
     rounds: 0,
-    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows, lanes: lanes },
+    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows, lanes: lanes, amendments: amendments },
   }
+}
+
+// [E2-12] Every dispute an already-settled node raised against another node's artifact. `disputed`
+// is where a maker is told to record a defect it believes belongs upstream; until now nothing ever
+// read it during the run.
+function upstreamDisputes() {
+  const out = []
+  for (const id of Object.keys(results)) {
+    const r = results[id]
+    for (const d of (r && r.disputed) || []) {
+      out.push(`    ${id} disputes ${d.criterion || 'the plan'} — ${String(d.why || '').replace(/\s+/g, ' ').slice(0, 300)}`)
+    }
+  }
+  if (!out.length) return []
+  return [`⚠ ${out.length} unresolved dispute(s) raised by an EARLIER step about this plan. The graph cannot act on them; you can, and it is free right now: [E2-12]`].concat(out)
+}
+
+// [E2-11] The slice table, printed once the slices are known and before the first one is built.
+// Plain headings on purpose: "Waits for" is readable, `blockedBy` needs you to know the system.
+function sliceTableLines(slices, levelOf) {
+  const rows = slices.map((sl) => ({
+    slice: sl.id,
+    title: String(sl.title || '').slice(0, 44),
+    screens: sl.ui === true ? 'yes' : 'no',
+    waits: (sl.blockedBy || []).join(', ') || '—',
+    wave: String(levelOf[sl.id] + 1),
+    test: (configFor(sl.dir).commands || {}).test || '(none)',
+  }))
+  const cols = ['slice', 'title', 'screens', 'waits', 'wave', 'test']
+  const head = { slice: 'Slice', title: 'Title', screens: 'Screens', waits: 'Waits for', wave: 'Wave', test: 'Test command' }
+  const width = {}
+  for (const c of cols) width[c] = rows.reduce((m, r) => Math.max(m, String(r[c]).length), head[c].length)
+  const line = (r) => '  ' + cols.map((c) => String(r[c]).padEnd(width[c])).join('  ')
+  return [`${rows.length} slices to build:`, line(head)].concat(rows.map(line))
+}
+
+// [E2-11] The plan, printed before the first agent is spawned. A run used to tell you what it was
+// doing only while it did it: you learned what work existed by watching it happen. Everything here
+// is already declared in NODES, and the call count is arithmetic on the same fields — nothing is
+// typed by hand, so editing the graph cannot leave a stale number behind.
+function planLines() {
+  const ids = Object.keys(NODES).filter((id) => NODES[id].kind !== 'report')
+  const rows = ids.map((id) => {
+    const nd = NODES[id]
+    const checkers = nd.checkers.map((c) => c.agent.replace('sdlc2-', '')).join(', ') || '—'
+    const rounds = nd.kind === 'fanout' ? `${nd.rounds} per slice` : String(nd.rounds)
+    return {
+      step: nd.phase,
+      writer: (nd.maker && nd.maker.agent || '—').replace('sdlc2-', ''),
+      checkers: checkers,
+      rounds: rounds,
+      calls: nd.rounds * (1 + nd.checkers.length) + (nd.arbiter ? 1 : 0),
+      fanout: nd.kind === 'fanout',
+    }
+  })
+  const w = (a, i) => a.reduce((m, r) => Math.max(m, String(r[i]).length), i.length)
+  const cols = ['step', 'writer', 'checkers', 'rounds']
+  const width = {}
+  for (const c of cols) width[c] = w(rows, c)
+  const line = (r) => '  ' + cols.map((c) => String(r[c]).padEnd(width[c])).join('  ')
+  const out = [`THE PLAN — ${rows.length} steps, then the report:`]
+  out.push(line({ step: 'Step', writer: 'Written by', checkers: 'Checked by', rounds: 'Max rounds' }))
+  for (const r of rows) out.push(line(r))
+  const upfront = rows.filter((r) => !r.fanout).reduce((t, r) => t + r.calls, 0)
+  const perSlice = rows.filter((r) => r.fanout).reduce((t, r) => t + r.calls, 0)
+  out.push(`  Worst case: ${upfront} agent calls before building starts, then up to ${perSlice} per slice.`)
+  out.push(`  ${NODES.ux.id} runs only if the product owner reports the feature has screens.`)
+  return out
 }
 
 // ────────────────────────────────────────────────────── report node ────
@@ -1501,7 +1796,7 @@ async function writeReport(node) {
         reason: r.reason || null,
       }
     })
-  const build = results.build && results.build.slices ? results.build.slices : { shipped: [], escalated: [], skipped: [], rows: [], lanes: null }
+  const build = results.build && results.build.slices ? results.build.slices : { shipped: [], escalated: [], skipped: [], rows: [], lanes: null, amendments: [] }
   const softPassed = nodeRows
     .filter((r) => r.verdict === 'soft-pass')
     .map((r) => r.node)
@@ -1520,6 +1815,7 @@ async function writeReport(node) {
       `Node results: ${JSON.stringify(nodeRows)}\n` +
       `Slices: ${JSON.stringify(build.rows)}\n` +
       `Lanes: ${JSON.stringify(build.lanes)}\n` +
+      `Amendments: ${JSON.stringify(build.amendments || [])}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
       `Maker disputes (checker findings the maker addressed but disagreed with): ${JSON.stringify(disputed)}\n\n` +
       `Structure: (0) a header carrying Feature, Run, Base branch, AND \`Engine: sdlc2 <version>\`\n` +
@@ -1549,6 +1845,18 @@ async function writeReport(node) {
       `(3) a human-verify index: read ${VH} if it exists and list every OPEN row (id · node ·\n` +
       `severity · one-line decision);\n` +
       `(4) the maker disputes, if any — they are unresolved disagreements, not noise;\n` +
+      // [E2-13] A criterion a slice could not execute is a decision about the product contract, and
+      // the debt it leaves is owed to a human. It never belongs only in a changelog.
+      `(4b) [E2-13] ACCEPTANCE CRITERIA THAT COULD NOT BE MET, from \`Amendments\` — its own section\n` +
+      `whenever the array is non-empty, never folded into the slice table. For each: the slice, the\n` +
+      `criterion, why that branch could not run it, and WHAT IS OWED and where it must land. These\n` +
+      `slices passed their tester against a contract the tester could not fully execute, so a green\n` +
+      `row here means less than a green row elsewhere — say that plainly. If the array is empty,\n` +
+      `state that every acceptance criterion was executed as written;\n` +
+      `(4c) [E2-08] whether the slice worktrees were released, from \`Lanes.release\`. \`released\`\n` +
+      `false, or a non-empty \`remaining\`, means trees still exist outside the repo holding branches\n` +
+      `checked out — say which, because the next run's clean-tree gate will meet them. Omit this\n` +
+      `line only when no worktree was ever created;\n` +
       `(5) a 2–3 sentence summary, then the next human action.\n\n` +
       `A node verdict of \`hard-fail\`, \`escalated\`, \`skipped\` or \`not-run\` MUST be stated as such\n` +
       `and never softened. If anything soft-passed, say so in the FIRST line of the summary — a run\n` +
@@ -1659,6 +1967,7 @@ async function walk() {
   // [SD-03] First line of every run: which engine, from where. This one line would have caught
   // the stale pin on run 1 instead of two runs later.
   log(`sdlc2 ${VERSION_RAN} — engine at ${ROOT} — run ${RUN_ID} on "${TITLE}" (base ${BASE}).`)
+  planLines().forEach(log) // [E2-11]
   const preds = predecessorsOf()
   const ids = Object.keys(NODES)
   const running = Object.create(null)
