@@ -8,9 +8,30 @@
 
 ## Do this first
 
+**Run 4. Everything it needs is already in place** (state saved 2026-08-23, before a session
+restart):
+
+| gate | state |
+|---|---|
+| plugin repo | `main` = `origin/main` = **`09839cf`**, tagged **`v0.1.6`**, tag pushed |
+| installed plugin | **0.1.6** at `gitCommitSha: 09839cf`; install cache is byte-identical to the repo, not even an `.in_use` marker |
+| lab repo | `main` = `origin/main` = **`6e5d623`**, clean, suite green (**84 tests, 4 files**) |
+| lab config | `stack:` and `lanes: 4` declared in the lab's `CLAUDE.md` sdlc2 block |
+| checks | `node verify.mjs` → **366**, was 311 |
+| restart | **the only thing left.** A session pins its plugin root at start (SD-03), so the session that ran the update is still on 0.1.4 |
+
+**First thing to check when run 4 starts: the first line must read `Engine: sdlc2 0.1.6`.** Note
+0.1.5 was never cached — the update went 0.1.4 → 0.1.6 directly — so run 4 is the first execution
+of BOTH releases. Pre-check 0 should refuse to start from the 0.1.4 directory that is still sitting
+in the cache, and that refusal has never fired against a real run, so verify it rather than trust it.
+
+**Seed: pick one whose slices are of visibly uneven length.** The biggest fix in 0.1.6 is the
+removal of the level barrier (E2-14), and a barrier only costs you when siblings finish at
+different times. Equal-length slices would hide both success and failure.
+
 **Step 6b is done: v0.1.6 implements all sixteen `sdlc2-enhance-2.md` items** (2026-08-23), except
-**E2-01**, which needs a packaging decision no code change can make. `node verify.mjs` passes
-**366 checks**, was 311. **None of it has run against real agents** — five releases in a row now.
+**E2-01**, which needs a packaging decision no code change can make. **None of it has run against
+real agents** — five releases in a row now.
 
 Six of the sixteen change PROMPTS rather than engine logic (**E2-02** the declared stack, **E2-11**
 the plan printout, **E2-12** surfaced disputes, **E2-13** the read-only contract, **E2-15** carry
@@ -25,7 +46,26 @@ Two of them change how a run BEHAVES and should be watched directly:
 - **E2-03** — the plateau exit is gone and a rejected maker output is re-made once free. A document
   node that has a round thrown out should still get its two scored rounds.
 
-**Before run 4:** push, `claude plugin update`, restart — installed is 0.1.4, local is now 0.1.6.
+**Three behaviour changes that will make run 4 LOOK different. None is a regression:**
+
+1. **Every slice gets its own worktree when lanes are on.** Continuous scheduling cannot know at
+   start time whether a slice will end up sharing the clock, so a worktree is the only safe choice
+   — and each one pays `npm ci`. Run 3 had three slices that ran alone and paid nothing. Weigh that
+   new cost against the 34 minutes the barrier was wasting.
+2. **Run 3's slice 06 would now escalate instead of shipping.** The developer can no longer edit the
+   issue file (E2-13), so narrowing a scenario at attempt 4 is not available. It reports an
+   `amendment` and escalates. Paired with E2-12, the architect's queue objection is printed BEFORE
+   the build starts, so the queue can be fixed while it is still free. Expect escalations where run
+   3 shipped, unless you act on the printed dispute.
+3. **The document phase may run shorter** (E2-15). If SCORES drop rather than time, that instruction
+   is too strong and should come back out.
+
+**Two items should stop waiting for a run — no run will ever settle them:**
+
+- **SD-05**, the free transport retry: three runs, 43 agents, zero errors. It can only be proven by
+  fault injection, which `verify.mjs` probe P18b already does. Close it as proven-by-probe.
+- **The veto round**: needs a checker to score above the bar while withholding a pass. Not
+  orderable from a seed. Build it as a probe or drop it from the pending list.
 
 
 **Step 6: run 3 is DONE** — `nf-20260823T1333Z`, feature `remembered-names`, 2h 21m, 43 agents,
