@@ -51,6 +51,18 @@ sdlc2 shares **nothing** at runtime with any other harness.
 - `[R-PKG-03]` **MUST**: the router reads only the dispatched mode file (progressive disclosure)
   and resolves every plugin path through `${CLAUDE_PLUGIN_ROOT}`, never a hardcoded `~/.claude`.
 - `[R-PKG-04]` **MUST**: an unknown or missing subcommand prints the table and stops. Never guess.
+- `[R-PKG-06]` **MUST**: before anything is spent, the mode file resolves `${CLAUDE_PLUGIN_ROOT}`,
+  reads the `VERSION` beside it, states both, and **refuses to run from a superseded plugin root**.
+  A Claude Code session pins its plugin root at start, and the plugin cache keeps every installed
+  version side by side in version-numbered directories — so after a mid-session
+  `claude plugin update` the old path keeps resolving and keeps working, and every measurement
+  taken is about an engine nobody is developing any more. Detection needs no harness internals and
+  **MUST NOT** reach for any (`[R-PKG-03]` forbids a hardcoded `~/.claude` path): when the plugin
+  root's own directory name is a version, a higher-sorting sibling means this session is stale.
+  A non-version directory name is a local or dev install — carry the version forward and skip the
+  comparison. Runs 1 and 2 of this plugin executed `0.1.1` while `0.1.2` was installed: ~6.3M agent
+  tokens measuring a superseded engine, two defects "found" that were already fixed upstream, and
+  nothing anywhere said so.
 - `[R-PKG-05]` **MUST**: the bundled installers (`install.sh`, `install.ps1`) install **only**
   through documented `claude plugin` subcommands. They **MUST NOT** run `git`, write any path
   under the user's home directory, or modify a project's `CLAUDE.md`; and they **MUST NOT**
@@ -315,6 +327,13 @@ checking anything out.
 - `[R-REP-01]` **MUST**: the run report states in its first summary line if anything soft-passed.
   A run with a soft-pass is never described as clean, and a `hard-fail`, `escalated`, `skipped` or
   `not-run` verdict is reported as itself and never softened.
+- `[R-REP-04]` **MUST**: the report names **the engine that produced it** — `sdlc2 <version>` and
+  the plugin root it ran from — in its header, verbatim as passed, including when that reads
+  `unknown`. The engine is sandboxed and cannot read its own `VERSION`, so the mode file reads it
+  beside the plugin root it resolved and passes it in (`[R-PKG-06]`). The same line is logged as
+  the **first line of the run**. A report that does not say which engine wrote it cannot be trusted
+  to be about the engine its reader thinks was installed, and a run report is the artifact that
+  outlives the log.
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
   it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
   rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
@@ -341,6 +360,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-PKG-01/02 | `.claude-plugin/*.json`, `commands/sdlc2.md` | both parse as JSON, the plugin is named `sdlc2`, its version matches `VERSION`, the router exists | ✅ |
 | R-PKG-03 | `commands/sdlc2.md`, `modes/*.md` | `${CLAUDE_PLUGIN_ROOT}` present, `~/.claude` absent | ✅ |
 | R-PKG-04 | `commands/sdlc2.md` | read the router's rules | 👁 |
+| R-PKG-06 | `modes/new-feature.md` pre-check 0 | greps: reads VERSION beside the plugin root, detects a higher-sorting sibling, stops on it, and passes `version` in the args | ✅ |
 | R-PKG-05 | `install.sh`, `install.ps1` | greps: only `claude plugin` for installation, no `git`, no home-dir path, no `CLAUDE.md` write, no prompt, no `Commands` assertion; the asserted agent/skill counts equal the shipped persona/skill counts; both documented in the README with a matching raw URL | ✅ |
 | R-CFG-01/03/05 | `modes/new-feature.md` §1.4 | read the mode's config step | 👁 |
 | R-CFG-02 | `assertArgs()` | the engine throws when `commands.test` is empty, and runs when it is not | ✅ |
@@ -382,6 +402,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-VH-01/03/04/05 | arbiter prompts | read them: append-only, read-then-append, VH is an input everywhere | 👁 |
 | R-VH-02 | `arbiterPrompt`, `buildArbiterPrompt` | ids are namespaced per arbiter (`VH-<node>-NN`, `VH-build-<slice>-NN`), so concurrent arbiters cannot collide; the loop still never arbitrates itself | ✅ |
 | R-REP-01/02 | the report prompt, `walk()` | a probe asserts the report node runs after an aborted graph; its wording is read | ✅ 👁 |
+| R-REP-04 | `VERSION_RAN`, `walk()`, the report prompt | a probe asserts the version reaches the report prompt, that an unstamped run says `unknown` rather than guessing, and that the run's first log line names the engine | ✅ |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 

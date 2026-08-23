@@ -35,6 +35,14 @@ scored as a critical defect against the maker's work, and an architect declaring
 edge in the one artifact the build engine does not read. All three are fixed here, all three now
 asserted.
 
+The fourth is the one that reframes the other three. Both earlier runs — some 6.3M agent tokens —
+executed **0.1.1 while 0.1.2 was the installed version**, because a session pins its plugin root
+when it starts and the cache keeps every version side by side, so the stale path kept resolving
+and kept working. Nothing signalled it. A run now names the engine that produced it on its first
+line and in its report header, and the pre-checks refuse to start from a superseded plugin root
+at all. If you take one idea from this repo, take that one: a measurement that cannot name what it
+measured is not yet evidence.
+
 v0.1.3 was the answer to the other thing run 1 showed: the graph was *slow*, and the cost was not
 where it looked. Engine prompts measure 600–1400 tokens, so prompt size was never the problem —
 the count of serial agent calls was. Document nodes burned all five rounds every time under a bar

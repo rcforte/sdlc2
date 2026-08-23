@@ -426,6 +426,11 @@ check(/WORKTREES = `[^`]*\$\{RUN_ID\}/.test(src), 'each run gets its own worktre
 check(/rmdir/.test(src), 'the release step removes the empty container with rmdir  [R-BUILD-07a]')
 check(/never \\`rm -rf\\`/.test(src), 'and says never rm -rf, in the instruction itself  [R-BUILD-07a]')
 check(/agentPrefix/.test(src) && /function at\(/.test(src), 'agent types are resolved through a host-configurable prefix')
+// [SD-03 / R-REP-04] The engine must know, and say, which engine it is.
+check(/const VERSION_RAN = A\.version \|\| 'unknown'/.test(src), 'the engine carries the version it was told it is, defaulting to unknown  [R-REP-04]')
+check(/log\(`sdlc2 \$\{VERSION_RAN\}/.test(src), 'and names it on the FIRST line of the run  [R-REP-04]')
+check(/Engine: sdlc2 \$\{VERSION_RAN\}/.test(src), 'and in the report header  [R-REP-04]')
+check(/Engine path: \$\{ROOT\}/.test(src), 'with the plugin root it actually ran from  [R-REP-04]')
 // `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the
 // engine said, which is the opposite of merging. Exclude it by name rather than loosening the grep.
 check(!/\bmerge\b[^\n]*\$\{BASE\}|git merge(?!-base)/.test(src), 'the engine never merges  [R-BUILD-06]')
@@ -635,6 +640,52 @@ await probe('node crash', async () => {
   check(E.results.architect.verdict === 'hard-fail', `a crashed node is a hard-fail row (got '${E.results.architect.verdict}')  [R-GRAPH-04]`)
   check(E.results.build.verdict === 'skipped', 'its dependents are skipped, not run against a missing design  [R-GRAPH-04]')
   check(reported === true, 'the report node runs anyway — a run nobody can read is not a finished run  [R-REP-01]')
+})
+
+// P10b — [SD-03 / R-REP-04 / R-PKG-06] the run says which engine produced it, and the mode file
+// refuses to start from a superseded one. Two runs of this plugin measured an engine nobody was
+// developing any more, and nothing anywhere said so.
+await probe('SD-03 engine identity', async () => {
+  let reportPrompt = ''
+  const logs = []
+  const stub = (extraArgs) => engine({
+    parallel: parallelReal,
+    log: (m) => logs.push(m),
+    args: Object.assign({}, ARGS, extraArgs),
+    agent: async (p, o) => {
+      const L = o.label || ''
+      if (L === 'report') { reportPrompt = p; return {} }
+      if (isMake(o) && L.startsWith('po')) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
+      if (L.startsWith('po:')) return scoreAll(E.RUBRICS.po, 1)
+      return {}
+    },
+  })
+  let E = stub({ version: '9.9.9', pluginRoot: '/cache/sdlc2/9.9.9' })
+  await E.walk()
+  check(/Engine: sdlc2 9\.9\.9/.test(reportPrompt), 'the report is given the engine version that ran  [R-REP-04]')
+  check(/Engine path: \/cache\/sdlc2\/9\.9\.9/.test(reportPrompt), 'and the plugin root it ran from  [R-REP-04]')
+  check(logs.some((m) => /^sdlc2 9\.9\.9 — engine at \/cache\/sdlc2\/9\.9\.9/.test(m)), 'and the run says so on its first line  [R-REP-04]')
+
+  // An unstamped run must say `unknown` — a guessed version is worse than an absent one, because
+  // it is the guess a reader would have made anyway.
+  reportPrompt = ''; logs.length = 0
+  E = stub({ version: undefined })
+  await E.walk()
+  check(/Engine: sdlc2 unknown/.test(reportPrompt), 'an unstamped run reports `unknown` rather than guessing  [R-REP-04]')
+})
+
+// P10c — [R-PKG-06] the mode file's pre-check 0, read as text: it is main-thread instructions, so
+// the only executable thing about it is that it says the right words in the right order.
+await probe('R-PKG-06 stale-pin pre-check', async () => {
+  const mode = R('modes/new-feature.md')
+  const pre0 = mode.slice(mode.indexOf('0. **Which engine'), mode.indexOf('1. **Git.**'))
+  check(pre0.length > 200, 'pre-check 0 exists and precedes the git check  [R-PKG-06]')
+  check(/VERSION/.test(pre0) && /CLAUDE_PLUGIN_ROOT/.test(pre0), 'it reads VERSION beside the resolved plugin root  [R-PKG-06]')
+  check(/sort -V/.test(pre0), 'it compares sibling version dirs by version order, not lexically  [R-PKG-06]')
+  check(/STALE/.test(pre0) && /\*\*stop\*\*/i.test(pre0), 'and STOPS on a superseded root rather than warning and continuing  [R-PKG-06]')
+  check(/local or dev install|non-version directory/i.test(pre0), 'a dev checkout is tolerated, not treated as stale  [R-PKG-06]')
+  check(!/\.claude\/plugins/.test(pre0), 'and it reaches for no harness internals to do it  [R-PKG-03]')
+  check(/"version":/.test(mode), 'the resolved version is passed to the engine in args  [R-PKG-06]')
 })
 
 // P11 — the ux gate skips ux WITHOUT taking build down with it. [R-GRAPH-03]

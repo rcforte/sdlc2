@@ -20,6 +20,14 @@ const TITLE = A.title || FEATURE
 const DIR = A.featureDir || `.sdlc2/features/${FEATURE}`
 const ROOT = A.pluginRoot || '${CLAUDE_PLUGIN_ROOT}'
 const RUN_ID = A.runId || 'nf-unstamped'
+// [SD-03] Which engine is actually executing. A Claude Code session pins `${CLAUDE_PLUGIN_ROOT}`
+// at start, and version directories sit side by side in the plugin cache — so after a mid-session
+// `claude plugin update` the stale path keeps resolving and keeps working. Runs 1 and 2 executed
+// 0.1.1 while 0.1.2 was the installed version: ~6.3M agent tokens measuring a superseded engine,
+// two defects "found" that were already fixed upstream, and nothing anywhere said so. The script
+// cannot read its own VERSION file (no filesystem), so the mode file reads it next to the plugin
+// root it resolved and passes it in. Unstamped is reported as unknown, never guessed.
+const VERSION_RAN = A.version || 'unknown'
 const BASE = A.defaultBranch || 'main'
 const CONFIG = A.config || { commands: {}, seam: {} }
 const CONFIG_BY_DIR = A.configByDir || {}
@@ -1501,11 +1509,17 @@ async function writeReport(node) {
       `you AUTHOR — you also commit files other nodes already wrote, per the last section, but you\n` +
       `edit none of them. Use exactly this data — invent nothing:\n\n` +
       `Feature: ${FEATURE} — "${TITLE}"\nRun: ${RUN_ID}\nBase branch: ${BASE}\n` +
+      `Engine: sdlc2 ${VERSION_RAN}\nEngine path: ${ROOT}\n` +
       `Node results: ${JSON.stringify(nodeRows)}\n` +
       `Slices: ${JSON.stringify(build.rows)}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
       `Maker disputes (checker findings the maker addressed but disagreed with): ${JSON.stringify(disputed)}\n\n` +
-      `Structure: (1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason,\n` +
+      `Structure: (0) a header carrying Feature, Run, Base branch, AND \`Engine: sdlc2 <version>\`\n` +
+      `with its path — [SD-03] state the engine verbatim as given, even when it reads \`unknown\`.\n` +
+      `A session pins its plugin root at start, so a report that does not name the engine it ran\n` +
+      `cannot be trusted to be about the engine you think you updated. Never omit it, never\n` +
+      `substitute a version you believe is installed;\n` +
+      `(1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason,\n` +
       `followed by a per-round score line for every node that used MORE THAN HALF its rounds, taken\n` +
       `from that node's \`history\` (e.g. \`po: 0.71 → 0.74 → 0.74 → 0.80 → 0.84\`, with the defect\n` +
       `count in brackets). Say which way it went — climbing means convergence that ran out of\n` +
@@ -1626,6 +1640,9 @@ async function runNode(node) {
 }
 
 async function walk() {
+  // [SD-03] First line of every run: which engine, from where. This one line would have caught
+  // the stale pin on run 1 instead of two runs later.
+  log(`sdlc2 ${VERSION_RAN} — engine at ${ROOT} — run ${RUN_ID} on "${TITLE}" (base ${BASE}).`)
   const preds = predecessorsOf()
   const ids = Object.keys(NODES)
   const running = Object.create(null)

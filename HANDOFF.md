@@ -4,7 +4,7 @@
 
 ## Do this first
 
-**Step 6: run 3 — the acceptance test for v0.1.4.** v0.1.4 is **written and green** (289 checks,
+**Step 6: run 3 — the acceptance test for v0.1.4.** v0.1.4 is **written and green** (304 checks,
 was 262) but **has never run against real agents** — the same trap as run 1, v0.1.2 and v0.1.3,
 three for three. Before run 3 exercises any of it: `git push`, then
 `claude plugin marketplace update sdlc2-marketplace`, then
@@ -17,13 +17,8 @@ What v0.1.4 changed, and what run 3 has to confirm about each:
 |---|---|---|
 | **SD-04** | Worktrees moved **outside** the repo — `../.sdlc2-worktrees/<feature>-<runId>/<slice>`, `[R-BUILD-07a]` | Lanes still start concurrently; the declared test command reports the project's OWN file count, not N+1; `git worktree list` shows only the main checkout at the end; the empty container is `rmdir`ed |
 | **SD-05** | Every spawn goes through `spawn()`, which retries a no-answer **once, free**, before a round is charged; the round is recorded `errored`, not `rejected`, and the defect is a *harness* defect. `[R-LOOP-11]` | A transport failure no longer costs a node its pass. The tell in the history is a round marked `errored` — and if one appears, check the node still had its full round budget for content |
+| **SD-03** | The run **names the engine that produced it** — first line of the run and the report header, `sdlc2 <version>` plus the plugin root, `unknown` when unstamped (`[R-REP-04]`). And **pre-check 0 refuses to start from a superseded plugin root** (`[R-PKG-06]`): version-numbered sibling dirs are compared with `sort -V`, no harness internals touched | The report opens with `Engine: sdlc2 0.1.4`. If it says anything else — or `unknown` — the run measured something other than what you pushed, and the rest of the report is about that other thing |
 | **SD-07** | `issues/` is the single source of truth for the queue: the architect mandate, the persona, `design.md`'s output note and the new **`AR-QUEUE`** rubric criterion all say so. `[R-ARCH-03]` | `design.md` asserts no `Blocked by:` edge absent from `issues/`. If the architect disagrees with the queue it must show up as a defect against the `po` node, not as an edge downstream |
-
-Still NOT done, and still the cheapest fix outstanding:
-
-- **SD-03** — the run report still does not name the engine it ran. No `pluginRoot`, no `VERSION`,
-  verified by grep against run 2's report. This is the finding that cost ~6.3M tokens of runs
-  measuring a superseded engine. One line in `[R-REP-01]`.
 
 
 SD-06 (a background workflow makes no progress while the session sits idle — 3h 01m of dead time
@@ -97,7 +92,7 @@ Also confirmed working, per the lab's findings file:
 | 3 | Fix what step 2 reveals, plus Part 0 | **done** — v0.1.2, 220 checks green |
 | 3b | *(unplanned)* `greeting-log` run + v0.1.3 | **done** — `nf-20260822T0327Z`; revealed SD-03, prompted `sdlc2-enhance-1.md` → v0.1.3. Seed cut a pure chain, so it could not test the fix |
 | 4 | **Run 2 proper: 0.1.3, lab session, diamond seed** | **done** — `nf-20260822T2305Z` (`saved-name`), 5 slices, 1 soft-pass, 6 VH records resolved and merged to lab `main`. `[R-BUILD-04a]` confirmed |
-| 5 | **v0.1.4 — fix SD-04, SD-05, SD-07** | **done** — all three fixed, 289 checks green (was 262). SD-03's version line is NOT done |
+| 5 | **v0.1.4 — fix SD-03, SD-04, SD-05, SD-07** | **done** — all four fixed, 304 checks green (was 262) |
 | 6 | **Run 3 — the acceptance test for v0.1.4** | **next**, and it must be pushed + `claude plugin update`d + a session restart FIRST |
 | 7 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
@@ -194,10 +189,12 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   settled*. `[R-BUILD-04a]`, `[R-REP-03]`, the tester's base assertions, `DOC_ROUNDS = 2` and the
   parallel lanes all executed against real agents. The lanes brought SD-04 with them.
 
-  **v0.1.4** (2026-08-23) fixes SD-04, SD-05 and SD-07: worktrees outside the repo
+  **v0.1.4** (2026-08-23) fixes SD-03, SD-04, SD-05 and SD-07: worktrees outside the repo
   (`[R-BUILD-07a]`), one `spawn()` wrapper that retries a no-answer free before charging a round
   (`[R-LOOP-11]`), and `issues/` as the queue's single source of truth (`[R-ARCH-03]`, `AR-QUEUE`).
-  `node verify.mjs` passes **289 checks**, including 21 new ones across three probes. **None of it
+  It also closes **SD-03**: the run names its own engine (`[R-REP-04]`) and pre-check 0 refuses to
+  start from a superseded plugin root (`[R-PKG-06]`). `node verify.mjs` passes **304 checks**,
+  including 42 new ones across five probes. **None of it
   has run against real agents.**
 
   **STALE AS OF v0.1.4 — installed is 0.1.3, local is 0.1.4.** Push, update, restart before run 3.

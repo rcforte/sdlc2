@@ -16,6 +16,41 @@ judgement call is a row in `VERIFY-WITH-HUMAN.md`, and the paperwork is committe
 
 Do these in order and **stop** on the first failure, saying exactly what to fix.
 
+0. **Which engine is about to run.** Do this FIRST — it is the cheapest check here and the one
+   whose absence cost the most. Resolve `${CLAUDE_PLUGIN_ROOT}`, read the `VERSION` beside it, and
+   say both out loud before anything else:
+
+   ```bash
+   root="${CLAUDE_PLUGIN_ROOT}"
+   ran=$(cat "$root/VERSION" 2>/dev/null || echo unknown)
+   echo "sdlc2 $ran — engine at $root"
+   ```
+
+   Then check that this session is not **pinned to a superseded engine**. A Claude Code session
+   fixes its plugin root at start, and the plugin cache keeps every installed version side by side
+   in version-numbered directories — so after a mid-session `claude plugin update` the old path
+   keeps resolving and keeps working, silently. If the plugin root's own directory name is a
+   version, look for a newer sibling:
+
+   ```bash
+   here=$(basename "$root"); parent=$(dirname "$root")
+   case "$here" in [0-9]*.[0-9]*.[0-9]*)
+     newest=$(ls -1 "$parent" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+     [ -n "$newest" ] && [ "$newest" != "$here" ] && echo "STALE: running $here, but $newest is installed" ;;
+   esac
+   ```
+
+   If that prints `STALE`, **stop**. Say that the session must be restarted to pick up `$newest`,
+   because nothing else will: the run would succeed, write its report, and return normal-looking
+   verdicts measured against an engine that is no longer the one being developed. That is not
+   hypothetical — runs 1 and 2 of this plugin executed 0.1.1 while 0.1.2 was installed, ~6.3M agent
+   tokens spent measuring a superseded engine, and it surfaced only because a finding cited
+   requirement IDs that were absent from the spec being read.
+
+   A non-version directory name (a local or dev install) is fine — skip the comparison and carry
+   the version forward. Pass whatever you read as `version` in the engine's args either way; the
+   engine reports it verbatim, and `unknown` is an honest answer where a guess is not.
+
 1. **Git.** Your **session's working directory is the target repo** — sdlc2 has no `repoRoot`
    argument. The engine builds `featureDir` as a relative path and hands the developer bare
    `git checkout -b` / `git commit` commands, and subagents inherit the session's cwd. A session
@@ -138,6 +173,7 @@ Check whether the **`Workflow` tool** is available to you.
       "title": "<the idea, verbatim>",
       "featureDir": ".sdlc2/features/<slug>",
       "pluginRoot": "<the resolved ${CLAUDE_PLUGIN_ROOT}>",
+      "version": "<the VERSION read beside it in pre-check 0 — verbatim, or \"unknown\">",
       "runId": "nf-<UTC>",
       "defaultBranch": "<resolved>",
       "config": { "commands": { "test": "…", "…": "…" }, "seam": { "backend": "…", "frontend": "…" } },
