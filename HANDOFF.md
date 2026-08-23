@@ -1,90 +1,92 @@
-# HANDOFF — resume point, 2026-08-21
+# HANDOFF — resume point, 2026-08-23
 
 > Transient working state, not plugin content. **Delete this file when the arc below completes.**
 
 ## Do this first
 
-**Step 4: re-run the lab against the fixed harness.** Start Claude Code in
-`~/dev/code/sdlc2-lab` — not in this repo, and not with `/add-dir`. sdlc2 has no `repoRoot`, so
-the graph builds in whatever repo the *session* is rooted in (pre-check 1, `SPEC.md` §12 risk 6).
+**Step 5: v0.1.4 — fix what run 2 found.** Run 2 is **done**: `saved-name`,
+run `nf-20260822T2305Z`, five slices, executed against **0.1.3** in a lab session. The findings
+are filed in the lab at `~/dev/code/sdlc2-lab/docs/harness-findings.md` (SD-01 … SD-07). Three of
+them are sdlc2 defects and belong here, plus one carried-over recommendation:
 
-The lab is ready: `main` carries run 1's four slices, its artifacts and the 14 resolved VH
-records; the suite is green (31 tests, 4 files); the tree is clean and the `slice/*` branches are
-deleted. The `tsconfig.tsbuildinfo` hygiene item is **done** (lab `132bb41`) — `npm run build` no
-longer dirties the tree. `agentPrefix: "sdlc2:"` — **re-probe it, discriminatingly, from the lab
-session, before spending anything.** Not from this repo: a probe here proves the plugin registers,
-not that it registers for the session that will spend the money, and a restart is exactly when it
-broke last time.
+| id | severity | what to change here |
+|---|---|---|
+| **SD-04** | high | Parallel lanes break the declared test command. Worktrees live **inside** the repo (`.sdlc2/worktrees/`), each with its own `node_modules`, so the project's own test runner collects them: measured **16 files / 98 failures**, every one `Invalid hook call` from a second React copy. Gitignoring them was only half the fix. **Preferred: move worktrees outside the repo** (sibling temp dir) and the whole class disappears. Otherwise `SETUP.md` + pre-check 4 must require a runner-level exclusion (`test.exclude` / `testPathIgnorePatterns` / `norecursedirs`), and the lane setup should verify the baseline suite passes *inside* a worktree before handing slices to it. |
+| **SD-05** | medium | A **transport failure is scored as a content defect**. `[ux:make (2/2)] failed: API Error: Connection lost mid-response` reached the checker as an empty artifact; it recorded "maker agent returned nothing" as critical, the round budget was spent, and the node soft-passed at 0.79 with two VH records. The engine can tell the difference — a thrown API error, not a returned-empty result — so **retry at the transport layer before charging a round**, and mark such a round `errored`, distinct from `rejected`, so the score history stays readable. |
+| **SD-07** | medium | The **architect can declare a dependency edge that contradicts the `po`'s issues, silently.** It judged slice 04 to need slice 02 and wrote that into `design.md`/ADR-0025 instead of amending the issue. `baseFor()` reads `issues/`, so the engine ignored it — **had it not, this run's diamond would have collapsed into a chain**, reproducing SD-01's symptom through a different door. Make `issues/` the single source of truth and say so in the architect's prompt; cheapest guard is to assert after the design node that every `Blocked by:` edge in `design.md` exists in `issues/`. |
+| **SD-03** | — | Still unimplemented: **the run report does not name the engine it ran.** Verified by grep against run 2's report — no `pluginRoot`, no `VERSION`. This is the finding that cost ~6.3M tokens of runs 1 and the 0327Z run measuring a superseded engine. Cheapest high-value change left. |
 
-The harness is ready too: v0.1.2 is pushed and installed (see Repo states). This run exercises
-fixes that have themselves never executed, which is the same trap as run 1 — expect the second
-round of "an agent quietly did not do what the prompt said", and look for it deliberately.
+SD-06 (a background workflow makes no progress while the session sits idle — 3h 01m of dead time
+inside a 4h 41m run) is a **harness** issue, not sdlc2's. Nothing to fix here; it does mean any
+wall-clock number from run 2 is meaningless, and that a graph run should not be left unattended.
 
-Run a **2–3 slice feature with a real `Blocked by:` chain** — that is what exercises the branch
-stacking that run 1 got wrong and that `[R-BUILD-04a]` now asserts. Then check, in this order:
+## What run 2 settled
 
-> **The seed is decided (2026-08-21): a visit's greeting history.** Bring this into the
-> grilling — *"during a visit I want to see the names I've been greeted as, and clear that list
-> when I'm done."* In memory only, so it stays consistent with run 1's `fresh visit starts clean`
-> guard slice rather than having to break it.
->
-> There is still no `.sdlc2/features/` entry for it — the dir holds only `greet-visitor` — so
-> pre-check 3 will fire sdlc2's own grilling. That is the one interactive step, in the main
-> thread, before the graph. Budget for that conversation.
->
-> The chain cannot be ordered directly: the `po` node writes the issues and decides what
-> `Blocked by:` what. This idea was picked because it *genuinely* needs one — a list cannot be
-> shown before it exists, and cannot be cleared before it is shown. Expect roughly:
->
-> | slice | likely | `Blocked by:` | base |
-> |---|---|---|---|
-> | 01 | show the history | — | `main` |
-> | 02 | clear the history | 01 | slice 01's branch |
-> | 03 | label / count it | 01 | slice 01's branch |
->
-> **The prediction that makes this run worth paying for:** 03 is blocked by 01 but *not* by 02,
-> so naive "stack each slice on the previous" — run 1's exact bug — becomes falsifiable for the
-> first time: `git merge-base --is-ancestor <slice-02> <slice-03>` must **fail**. Run 1 could
-> never make that assertion, because with four independent slices every stacking was vacuously
-> consistent with the invariant.
->
-> If the `po` comes back with no `Blocked by:` line anywhere, the run does not test the fix —
-> say so and reshape the idea rather than proceeding.
+The run was worth paying for. **`[R-BUILD-04a]` is confirmed working against real agents for the
+first time**, and it took three attempts to get a seed that could test it.
 
+The `po` cut a genuine **diamond** — better than the fork the seed was engineered for:
 
-1. Did the tester actually run the `git merge-base --is-ancestor` assertions? They are the whole
-   enforcement; if the tester skips them, the invariant is back to being a wish.
-2. Was each blocked slice cut from **its own blocker**, and the independent one from `main`?
-   With 02 and 03 both blocked by 01, the sharp check is the *negative* one — 02 must **not** be
-   an ancestor of 03. That is the assertion run 1's slice shape could not express.
-3. Did the report node commit the paperwork to `sdlc2/<feature>`, leaving a clean tree?
-4. Do the per-round score histories climb, flatline, or oscillate? **v0.1.3 changed what this
-   measures.** Doc nodes now get **2 rounds**, not 5, the bar is **0.80**, and a `high` no longer
-   vetoes a document. So the question is no longer "why does it always cap out" — it is:
-   - does a doc node now **pass unaided**, and in how many rounds?
-   - is there any round with **`score ≥ bar` and no pass**? That is a *veto* round, and it is the
-     open question §1.1 of `sdlc2-enhance-1.md` could not settle from run 1's data.
-   - does the **plateau exit** ever fire, and was it right to?
-5. **Did anything actually run in a lane?** The lab now declares `commands.install`, so independent
-   slices should build concurrently in `.sdlc2/worktrees/`. Check the log for `▸ level 0: building
-   … ∥ …`, and check the worktrees were released — `git worktree list` should show only the main
-   checkout when the run ends, with every `slice/*` branch still present.
-6. **Did the po return its own slice manifest?** If it did, there is no `slices:resolve` spawn in
-   the log at all. If it did not, the fallback ran and that is worth knowing.
+```
+        01 save the greeted name          (Blocked by: none,  cut from main)
+       / |  \
+     02  03   04                          (all three Blocked by: 01, all cut from 01)
+       \ /
+        05 fresh visit clears it          (Blocked by: 02 AND 03 — engine merged 02 into 05)
+```
+
+Independently re-verified here from the report's SHAs, resolving every ref first (SD-01's trap —
+`--is-ancestor` exits non-zero on an unknown ref, which is indistinguishable from a true
+negative). Full 5×5 matrix:
+
+- **Every declared edge holds.** 01 ⊂ {02,03,04,05}; 02 ⊂ 05; 03 ⊂ 05.
+- **Every negative holds.** 02 ⊄ 03, 03 ⊄ 02, 02 ⊄ 04, 04 ⊄ anything.
+
+`git merge-base --is-ancestor <02> <03>` **fails**, as required. That is the assertion run 1 could
+not make (four independent slices, every stacking vacuously consistent) and the 0327Z run could
+not make (a pure chain). Third attempt, finally falsifiable, and it passed.
+
+Also confirmed working, per the lab's findings file:
+
+- **Tester base assertions** — all 7 tester invocations actually executed `git merge-base
+  --is-ancestor`. The invariant is enforced, not merely instructed.
+- **`[R-REP-03]`** (SD-02's fix) — paperwork committed to `sdlc2/saved-name`, clean tree. The
+  reflog shows the branch was created, committed to, and merged by the human. Run 1 committed
+  nothing; the 0327Z run committed all but the report; run 2 committed everything.
+- **Parallel lanes** — three developers started at the identical second (23:02:48) in three
+  worktrees, and all worktrees were released at the end with every `slice/*` branch intact.
+  *(The diamond is what gave lanes something to parallelise — a chain serialises trivially.)*
+- **`DOC_ROUNDS = 2`** — `po` passed unaided (0.72 → 0.88) and `architect` passed unaided
+  (round-1 rejection → 0.87), neither arbitrated. Run 1's "all three doc nodes burn all five
+  rounds and arbitrate anyway" is gone. Both still spend both rounds, though.
+- **`R-IND-02`** — all 32 persona spawns were `sdlc2:sdlc2-*`. A discriminating probe ran
+  *before* any spending, on four markers the global lookalike could not fabricate.
+
+### Still unanswered after two real runs
+
+- **The veto-round question** (`sdlc2-enhance-1.md` §1.1) — is there a round with `score ≥ bar`
+  and no pass? Run 2 produced **no such round**: `po` 0.72 and `ux` 0.79 were both *below* bar,
+  and the two rejected rounds carried no score at all. No data either way. Needs another run.
+- **The plateau exit** — did not visibly fire; all three doc nodes used exactly their 2 rounds.
+- **`hasUiStories`** — set correctly here, but still unenforced. A `po` that sets it false on a
+  feature with a screen still skips `ux` with one log line.
 
 ## Where we are
 
 | Step | What | State |
 |---|---|---|
 | 1 | Build the minimal lab | **done** — `~/dev/code/sdlc2-lab`, green, committed |
-| 2 | Run one thin feature through the graph as-is | **done** — run `nf-20260816T0246Z`, 4 slices, 2 soft-passes, 14 VH records, all resolved and merged to lab `main` |
-| 3 | Fix what step 2 reveals, **plus Part 0** | **done** — v0.1.2, all three Part 0 items + the two defects run 1 exposed; 220 checks green |
-| 4 | Re-run the lab, incl. a 2–3 slice feature to exercise stacking | **next** |
-| 5 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
+| 2 | Run one thin feature through the graph as-is | **done** — `nf-20260816T0246Z`, 4 slices; later shown to have executed **0.1.1** (SD-03) |
+| 3 | Fix what step 2 reveals, plus Part 0 | **done** — v0.1.2, 220 checks green |
+| 3b | *(unplanned)* `greeting-log` run + v0.1.3 | **done** — `nf-20260822T0327Z`; revealed SD-03, prompted `sdlc2-enhance-1.md` → v0.1.3. Seed cut a pure chain, so it could not test the fix |
+| 4 | **Run 2 proper: 0.1.3, lab session, diamond seed** | **done** — `nf-20260822T2305Z` (`saved-name`), 5 slices, 1 soft-pass, 6 VH records resolved and merged to lab `main`. `[R-BUILD-04a]` confirmed |
+| 5 | **v0.1.4 — fix SD-04, SD-05, SD-07 + print the engine version** | **next** |
+| 6 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
-The order held up. Running first was right: reading predicted three fixes and run 1 produced two
-more that reading had missed for months — one of them on the first step of three personas. Every
-bug in this project has now been found by executing something, without exception.
+The order held up, and the pattern is now four for four: **every bug in this project has been
+found by executing something.** Run 2 adds four more that no amount of reading found — including
+SD-04, where the feature that had never executed (parallel lanes, new in 0.1.3) broke the tester's
+own ground truth the first time it ran.
 
 ## What run 1 found, and what v0.1.2 does about it
 
@@ -170,37 +172,56 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   continuous executor in place of the wave barrier. `node verify.mjs` passes **262 checks**
   (was 220), including six new behavioural probes.
 
-  **None of it has run against real agents** — the same trap as run 1 and v0.1.2. Run 2 is now
-  also the acceptance test for these changes.
+  **Run 2 was the acceptance test for these changes, and they largely held** — see *What run 2
+  settled*. `[R-BUILD-04a]`, `[R-REP-03]`, the tester's base assertions, `DOC_ROUNDS = 2` and the
+  parallel lanes all executed against real agents. The lanes brought SD-04 with them.
+
+  **Installed = local, verified 2026-08-22 22:35 UTC.** `installed_plugins.json` records
+  `version: "0.1.3"` at `gitCommitSha: a0dc296`, which is this repo's HEAD with a clean tree, and
+  a recursive diff of the repo against the install cache is identical apart from the harness's own
+  `.in_use` marker. Resolve `${CLAUDE_PLUGIN_ROOT}` at runtime rather than hardcoding it —
+  `[R-PKG-03]` forbids the literal path, and 0.1.1 and 0.1.2 are still cached as siblings, so the
+  parent dir is not the answer. **Parity is not resolution**: the files matching says nothing
+  about which persona answers to `sdlc2:sdlc2-po`, so still probe that from the lab session before
+  spending the run. And per SD-03, parity at *install* time is not parity at *run* time — a
+  session pins its plugin root at start, so the lab session must be launched **after** the
+  update, not merely on a machine where the update happened.
 
   The v0.1.2 line, for history —
   the engine (`baseFor`, tester base assertions, reviewer base, round history, `[R-REP-03]`),
   both skill rewrites, `SPEC.md`, `modes/new-feature.md`, `verify.mjs` (+15 checks, P14).
   `node verify.mjs` passes **220 checks**.
-- **Installed is 0.1.2, local is 0.1.3 — push and `claude plugin update` BEFORE run 2, then
-  restart, or the run exercises none of the above.** The v0.1.2 parity note, for reference:
-  **Installed = local.** `claude plugin update sdlc2@sdlc2-marketplace` took user scope from
-  0.1.1 to 0.1.2 on 2026-08-21, and the resolved `${CLAUDE_PLUGIN_ROOT}` for 0.1.2 (a
-  **version-numbered dir** under the marketplace plugin cache — resolve it at runtime rather than
-  hardcoding it here, which `[R-PKG-03]` forbids; note 0.1.1 is still cached as a sibling, so the
-  parent dir is not the answer) is byte-identical to this repo for `new-feature.workflow.js`,
-  `modes/`, `skills/`, `agents/` and `VERSION`. Re-verified 2026-08-21 after the restart.
+- *(The 2026-08-21 "installed is 0.1.2, push before run 2" item is **done** — see the parity
+  paragraph above.)*
   **Parity is not resolution** — the files matching says nothing about which persona answers to
   `sdlc2:sdlc2-po`, so still probe that from the lab session before spending the run.
-- **`~/dev/code/sdlc2-lab`** — lab. `main` at `132bb41`, clean, 7 commits, suite green (31 tests,
-  4 files, ~1.7s). Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
+- **`~/dev/code/sdlc2-lab`** — lab. `main` at `40cbfc0`, clean, suite green (**61 tests, 4 files,
+  2.92s** — re-run 2026-08-23). Carries **run 2 merged**: `saved-name`'s five slices, its
+  artifacts, and the six VH records resolved (`40cbfc0`); the `slice/saved-name/*` branches are
+  deleted, so **resolve the report's SHAs before asserting anything about them** — SD-01's trap.
+  Also carries `docs/harness-findings.md`, now **SD-01 … SD-07** plus a *confirmed working*
+  section, which is the authoritative record of both runs. The three unmerged
+  `slice/greeting-log/*` branches stay as SD-01's reproduction evidence.
+  `vite.config.ts` now excludes `.sdlc2/worktrees/**` and `.claude/worktrees/**` — that is the
+  lab-side half of SD-04, and it is a workaround, not the fix. Run 1's slice branches deleted; `vh-resolutions/greet-visitor` is now identical
   to `main` and can be deleted whenever. `tsconfig.tsbuildinfo` is untracked and gitignored, and
   `npm run build` was re-run to confirm it leaves the tree clean. **Now also** ignores
   `.sdlc2/worktrees/` and `.claude/worktrees/` — measured: one isolated agent takes the tree from
   clean to `?? .claude/`, which fails sdlc2's own pre-check 1 — and declares
   `install: "npm ci"`, which is what opens the parallel lanes.
 
-## What to watch in run 2
+## What run 2 answered, and what run 3 must watch
 
-- **Whether the tester actually runs the base assertions.** Everything else here rests on it.
-- **Round counts and the new score histories.** Climbing vs flat is the whole question; see
-  `SPEC.md` §12 risk 5.
-- **Whether the report node's git steps work** — it is `sonnet`/`medium` doing branch surgery, and
-  its failure mode is meant to be a `## Paperwork not committed` section, never a lost artifact.
+Run 2's checklist is resolved above under **What run 2 settled**. Carried forward for run 3:
+
+- **The veto-round question and the plateau exit** — neither produced data. Run 3 is the third
+  attempt at §1.1 of `sdlc2-enhance-1.md`.
 - **`hasUiStories`.** If the `po` sets it false on a feature with a screen, `ux` is skipped with a
-  single log line and `R-PO-04` is violated in the least visible way possible. Still unenforced.
+  single log line and `R-PO-04` is violated in the least visible way possible. Still unenforced,
+  two runs later.
+- **Whether SD-04's fix holds.** If worktrees move outside the repo, re-check that lanes still
+  start concurrently and that worktrees are still released.
+- **Whether a transport error still costs a node its pass** (SD-05). The tell is a round with no
+  score in the history; after the fix it should read `errored` and not consume the budget.
+- **Do not leave the run unattended** (SD-06), and treat any wall-clock figure as suspect unless
+  agent time is stamped separately from elapsed time.
