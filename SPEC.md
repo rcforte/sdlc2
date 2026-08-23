@@ -340,6 +340,14 @@ checking anything out.
   coming to the report afterwards could not tell a run that used its lanes from one that silently
   did not. When lanes stayed shut because the project declares no `commands.install`, the report
   names that as the one-line config change that opens them (`[SD-08]`, found by run 3).
+- `[R-REP-06]` **MUST**: the report renders a **fan-out node's row from its units, never as
+  blanks**. A fan-out node runs its maker/checker loop once per unit rather than once, so it has no
+  score and no rounds of its own; printing the `null` and the `0` verbatim gives a reader `—` and
+  `0`, which says the node went unmeasured when in fact it was measured once per unit. The row
+  carries the per-unit review spread and the worst attempts against the cap instead, and the table
+  is followed by a line naming the slice table as where the per-unit detail lives. Found in the
+  `saved-at` run, where `build | pass | — | 0` sat beside three scored nodes and read as missing
+  data.
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
   it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
   rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
@@ -410,6 +418,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-REP-01/02 | the report prompt, `walk()` | a probe asserts the report node runs after an aborted graph; its wording is read | ✅ 👁 |
 | R-REP-04 | `VERSION_RAN`, `walk()`, the report prompt | a probe asserts the version reaches the report prompt, that an unstamped run says `unknown` rather than guessing, and that the run's first log line names the engine | ✅ |
 | R-REP-05 | the lane scheduler, the report prompt | the scheduler records `lanes` (batches, widest, install) and the build node carries it; the report prompt is handed it and told to state it either way | ✅ |
+| R-REP-06 | `writeReport()`'s node rows, the report prompt | probes assert a fan-out row carries `fanout` with its unit counts, review spread and attempts-against-cap, and that the prompt forbids the bare `—`/`0` cells | ✅ |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 

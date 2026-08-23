@@ -447,6 +447,14 @@ check(/Lanes\.release/.test(src), 'and whether the worktrees were actually relea
 check(/amendments: \{/.test(src), 'and a developer proposes a contract amendment rather than editing the issue  [E2-13]')
 check(/THAT FILE IS READ-ONLY TO YOU/.test(src), 'the developer is told the acceptance criteria are read-only to it  [E2-13]')
 check(/`Lanes: \$\{JSON\.stringify\(build\.lanes\)\}/.test(src), 'and the report prompt is handed it  [R-REP-05]')
+
+// [R-REP-06] A fan-out node is measured once per unit, so a row of `—` and `0` is not a missing
+// measurement — it is n of them, thrown away on the way to the page.
+check(/NODES\[id\]\.kind === 'fanout' && r\.slices/.test(src), 'a fan-out node row is enriched from its units  [R-REP-06]')
+check(/units: \{\s*total: unitRows\.length/.test(src), 'carrying how many units there were  [R-REP-06]')
+check(/review: reviews\.length \? \{ min: Math\.min\(\.\.\.reviews\), max: Math\.max\(\.\.\.reviews\)/.test(src), 'the spread of their review scores  [R-REP-06]')
+check(/attempts: tries\.length \? \{ worst: Math\.max\(\.\.\.tries\), cap: NODES\[id\]\.rounds/.test(src), 'and the worst attempts against the per-unit cap  [R-REP-06]')
+check(/Do NOT print .*in those two cells/.test(src), 'and the report prompt forbids rendering it as blanks  [R-REP-06]')
 check(/\(2b\) \[R-REP-05\] how the slices were BUILT/.test(src), 'which is told to state it, in its own numbered section  [R-REP-05]')
 check(/never omitted/.test(src) && /commands\.install/.test(src), 'either way — including naming the config change that would open the lanes  [R-REP-05]')
 // `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the

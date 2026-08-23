@@ -1785,7 +1785,7 @@ async function writeReport(node) {
     .filter((id) => NODES[id].kind !== 'report')
     .map((id) => {
       const r = results[id] || { verdict: 'not-run', score: null, rounds: 0 }
-      return {
+      const row = {
         node: id,
         verdict: r.verdict,
         score: r.score,
@@ -1795,6 +1795,29 @@ async function writeReport(node) {
         history: r.history || [],
         reason: r.reason || null,
       }
+      // [R-REP-06] A fan-out node has no score and no rounds of its OWN, because it runs its
+      // maker/checker loop once per unit rather than once. Handing the report `score: null,
+      // rounds: 0` renders as `—` and `0`, which reads as a node nobody measured — the exact
+      // opposite of the truth, which is that it was measured n times. So carry the per-unit
+      // spread out with the row: the cell then says what the node did, and the reader is pointed
+      // at the table that holds the detail instead of inferring a gap.
+      if (NODES[id].kind === 'fanout' && r.slices) {
+        const unitRows = r.slices.rows || []
+        const reviews = unitRows.map((u) => u.review).filter((v) => typeof v === 'number')
+        const tries = unitRows.map((u) => u.attempts).filter((v) => typeof v === 'number' && v > 0)
+        row.fanout = {
+          over: NODES[id].fanout,
+          units: {
+            total: unitRows.length,
+            shipped: r.slices.shipped.length,
+            escalated: r.slices.escalated.length,
+            skipped: r.slices.skipped.length,
+          },
+          review: reviews.length ? { min: Math.min(...reviews), max: Math.max(...reviews), n: reviews.length } : null,
+          attempts: tries.length ? { worst: Math.max(...tries), cap: NODES[id].rounds, retried: tries.filter((t) => t > 1).length } : null,
+        }
+      }
+      return row
     })
   const build = results.build && results.build.slices ? results.build.slices : { shipped: [], escalated: [], skipped: [], rows: [], lanes: null, amendments: [] }
   const softPassed = nodeRows
@@ -1823,8 +1846,16 @@ async function writeReport(node) {
       `A session pins its plugin root at start, so a report that does not name the engine it ran\n` +
       `cannot be trusted to be about the engine you think you updated. Never omit it, never\n` +
       `substitute a version you believe is installed;\n` +
-      `(1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason,\n` +
-      `followed by a per-round score line for every node that used MORE THAN HALF its rounds, taken\n` +
+      `(1) a node table — node · verdict · score · rounds · arbitrated · VH ids · reason.\n` +
+      `[R-REP-06] A node carrying a \`fanout\` object ran its loop once PER unit and never once, so\n` +
+      `it has no score and no rounds of its own. Do NOT print \`—\` and \`0\` in those two cells: a\n` +
+      `reader takes that for a node nobody measured, when it was measured \`units.total\` times.\n` +
+      `Fill Score from \`review\` — \`0.94–0.99 across 4 slices\`, or the bare score when \`review.n\`\n` +
+      `is 1, or \`no slice scored\` when it is null — and Rounds from \`attempts\` as the worst any\n` +
+      `one unit needed against the cap, \`1 of 5 max, per slice\`, adding \`· N retried\` when\n` +
+      `\`attempts.retried\` is not zero. Then one line under the table saying the per-unit detail is\n` +
+      `the slice table in section 2, so nobody reads the summary cell as the whole story.\n` +
+      `Then a per-round score line for every node that used MORE THAN HALF its rounds, taken\n` +
       `from that node's \`history\` (e.g. \`po: 0.71 → 0.74 → 0.74 → 0.80 → 0.84\`, with the defect\n` +
       `count in brackets). Say which way it went — climbing means convergence that ran out of\n` +
       `rounds, flat or oscillating means the loop is thrashing. Do not diagnose further.\n` +
