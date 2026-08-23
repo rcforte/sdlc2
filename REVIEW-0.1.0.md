@@ -1,5 +1,10 @@
 # Review — sdlc2 v0.1.0 harness
 
+> **Not plugin content.** This is an internal working document. It ships with the plugin only
+> because the marketplace entry uses `source: "./"`, which packages the whole repository —
+> see `sdlc2-enhance-2.md` **E2-01**. Nothing in `agents/`, `modes/`, `skills/`,
+> `commands/` or the engine depends on it, and no user of sdlc2 needs to read it.
+
 > **Status: closed. Every finding below is fixed in v0.1.1**, plus one more (H13) found while
 > fixing. `node verify.mjs` grew from 88 structural checks to 165 covering structure *and*
 > behaviour under agent failure. See the [Resolution log](#resolution-log) at the end for what

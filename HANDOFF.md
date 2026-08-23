@@ -1,8 +1,32 @@
 # HANDOFF — resume point, 2026-08-23
 
 > Transient working state, not plugin content. **Delete this file when the arc below completes.**
+>
+> It ships with the plugin regardless, because the marketplace entry uses `source: "./"` and
+> packages the whole repository — see `sdlc2-enhance-2.md` **E2-01**, which is the one item in
+> that file no code change can close.
 
 ## Do this first
+
+**Step 6b is done: v0.1.6 implements all sixteen `sdlc2-enhance-2.md` items** (2026-08-23), except
+**E2-01**, which needs a packaging decision no code change can make. `node verify.mjs` passes
+**366 checks**, was 311. **None of it has run against real agents** — five releases in a row now.
+
+Six of the sixteen change PROMPTS rather than engine logic (**E2-02** the declared stack, **E2-11**
+the plan printout, **E2-12** surfaced disputes, **E2-13** the read-only contract, **E2-15** carry
+the seed forward, **E2-16** the reviewer's exclusion list). A probe cannot judge a prompt, so those
+six are exactly what run 4 has to look at.
+
+Two of them change how a run BEHAVES and should be watched directly:
+
+- **E2-14** — slices are scheduled against their own blockers now, with no level barrier. Run 3 lost
+  34 of 141 minutes to that barrier. Run 4 should show a slice starting the moment its blocker
+  lands, while an unrelated sibling is still building.
+- **E2-03** — the plateau exit is gone and a rejected maker output is re-made once free. A document
+  node that has a round thrown out should still get its two scored rounds.
+
+**Before run 4:** push, `claude plugin update`, restart — installed is 0.1.4, local is now 0.1.6.
+
 
 **Step 6: run 3 is DONE** — `nf-20260823T1333Z`, feature `remembered-names`, 2h 21m, 43 agents,
 3.0M subagent tokens, 0 agent errors. Seven slices shipped, none escalated, no soft-passes, four
@@ -22,8 +46,24 @@ green, was 304. **It has not itself been run**, so it joins the same queue every
 in. It rides its own version rather than becoming a second tree calling itself 0.1.4, which is the
 thing the `v0.1.4` tag was created to prevent.
 
-**Next is step 6b**, `sdlc2-enhance-2.md`, unchanged by run 3 except that E2-03/04/05 were live
-during it — see the note below.
+**Next is step 6b**, `sdlc2-enhance-2.md`, now **13 items**. Run 3 added two of them and settled
+the status of several more — see its own *What run 3 showed about the items written before it*
+section, and the note below.
+
+The two run 3 found are both about the same blind spot — **the graph can notice its plan is
+wrong and cannot act on it**:
+
+- **E2-12** — a defect filed against an earlier step never reaches that step. The architect
+  refuted issue 06's queue, correctly and on time, filed it as `VH-01` against the `po` node,
+  and the build then executed the refuted queue anyway. Slice 06 spent four of five attempts on
+  the consequence. This is the gap SD-07 left: it stopped the architect from silently
+  correcting the queue downstream, and gave the queue no way to be corrected at all.
+- **E2-13** — the developer amended the acceptance criteria it was being judged against
+  (`VH-06`). It did so well: options weighed, debt named and located, a human paid it in
+  `3d4c2e1`. But the tester reads those criteria from the issue file, the developer can edit
+  that file, and an honest narrowing and a quiet deletion produce the same green. The issue
+  files are also uncommitted and shared across every lane until the report node's paperwork
+  commit at the very end.
 
 **The version gates are closed** (2026-08-23). `main` is pushed and matches `origin/main` at
 `90131b9`; `installed_plugins.json` records `version: "0.1.4"` at that same sha; a recursive diff

@@ -114,21 +114,35 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    ## sdlc2
    <!-- sdlc2:config -->
    ```yaml
+   # The stack this project actually uses. sdlc2 has no house stack: this line is what the
+   # developer writes in and what the reviewer judges idiom against. [E2-02]
+   stack:  "<language + framework + test runner, as this repo actually uses them>"
+   lanes:  4                       # optional; max slices built at once. Default 4. [E2-10]
    commands:
-     test:    "./mvnw -q test"    # MANDATORY — the tester's executable ground truth
+     test:    "<the command that runs this project's tests>"   # MANDATORY — the tester's oracle
      build:   ""                   # optional; omit what the stack lacks
      install: ""                   # optional; UNLOCKS PARALLEL SLICE LANES — see below
      run:     ""
      e2e:     ""
    seam:
-     backend:  "REST via MockMvc (@SpringBootTest)"
+     backend:  "<how an API-level acceptance test is driven here>"
      frontend: ""                  # empty until a frontend exists
    ```
    <!-- /sdlc2:config -->
    ~~~
 
+   Every value above is a placeholder to fill from the project in front of you. Two worked
+   examples, so the shape is clear and neither is a default:
+
+   ~~~yaml
+   # a JVM service                          # a TypeScript SPA
+   stack: "Java 21, Spring Boot 3, JUnit 5" # stack: "TypeScript, React 19, Vitest + RTL"
+   commands: { test: "./mvnw -q test" }     # commands: { test: "npm test -- --run", install: "npm ci" }
+   seam: { backend: "REST via MockMvc" }    # seam: { frontend: "React Testing Library via Vitest (jsdom)" }
+   ~~~
+
    - **Missing block** → detect the stack (build files, test runner, existing test layout),
-     **propose** the block, show it, and **ask for confirmation before appending it** to
+     **propose** the block including a truthful `stack:` line, show it, and **ask for confirmation before appending it** to
      `CLAUDE.md`. Never write it silently: that file is the user's, and it is loaded into every
      session. If there is no `CLAUDE.md`, offer to create one containing just this section.
    - **`commands.test` empty or absent** → stop. Without it the `tester` has no oracle and the
@@ -176,11 +190,15 @@ Check whether the **`Workflow` tool** is available to you.
       "version": "<the VERSION read beside it in pre-check 0 — verbatim, or \"unknown\">",
       "runId": "nf-<UTC>",
       "defaultBranch": "<resolved>",
-      "config": { "commands": { "test": "…", "…": "…" }, "seam": { "backend": "…", "frontend": "…" } },
+      "config": { "stack": "…", "lanes": 4, "commands": { "test": "…", "…": "…" }, "seam": { "backend": "…", "frontend": "…" } },
       "configByDir": { "frontend/": { "commands": { "test": "npm test" } } },
       "agentPrefix": ""
     }
     ```
+    Pass the config block through **whole**, `stack` and `lanes` included: the engine puts `stack`
+    in front of every persona (`[E2-02]`) and reads `lanes` as the concurrency cap (`[E2-10]`).
+    Dropping a key here silently restores the old hardcoded behaviour.
+
     Pass `config` **inline** — the sandboxed script has no filesystem access, and every agent
     prompt it builds needs the test command.
 - **Not available** → say so plainly and stop. The main-thread fallback engine is **deferred**

@@ -1,5 +1,10 @@
 # sdlc2-enhance-1 — making the graph faster, cheaper and sharper
 
+> **Not plugin content.** This is an internal working document. It ships with the plugin only
+> because the marketplace entry uses `source: "./"`, which packages the whole repository —
+> see `sdlc2-enhance-2.md` **E2-01**. Nothing in `agents/`, `modes/`, `skills/`,
+> `commands/` or the engine depends on it, and no user of sdlc2 needs to read it.
+
 > Adversarial review of sdlc2 v0.1.2, prompted by one observation: **it takes a long time to run.**
 > Every claim below is cited to `file:line` and labelled with a confidence. Numbers marked
 > **measured** were produced by executing the engine's own declarations against stubs; numbers
@@ -732,7 +737,7 @@ has to be part of E-07, and one worth adding to `SETUP.md` for step 5.
 ```
 $ git checkout probe/worktree-isolation
 fatal: 'probe/worktree-isolation' is already used by worktree at
-       '/home/rcforte/dev/code/sdlc2/.claude/worktrees/agent-a32235ac22589b95b'
+       '<repo>/.claude/worktrees/agent-a32235ac22589b95b'
 ```
 
 The adversarial review predicted this, and it is confirmed. It constrains E-07 design (B)

@@ -28,7 +28,7 @@ between the product story and the built UI. You own *how the product flows*, not
 - A flow is a sequence of decisions; good UX removes decisions.
 - If a flow needs explaining, it's broken — redesign, don't annotate.
 - The state you forgot to design is the one users hit first.
-- Wireframes are cheap; rebuilt React is expensive — resolve structure in ASCII first.
+- Wireframes are cheap; rebuilt UI is expensive — resolve structure in ASCII first.
 
 ## Skills you reach for
 sdlc2 is self-contained: read skills from `${CLAUDE_PLUGIN_ROOT}/skills/`, and use those files
@@ -54,12 +54,12 @@ inside the sdlc2 graph there is no running app for one to inspect.
 4. **State matrix** — per screen, every state designed (table).
 5. **Wireframes** — ASCII block layout, primary action marked.
 6. **A11y & responsive notes** — keyboard order, focus, breakpoints.
-7. **Handoff AC** — the experience assertion the Playwright test must prove ("user completes the task without instruction").
+7. **Handoff AC** — the experience assertion the end-to-end test must prove ("user completes the task without instruction").
 
 ## Anti-patterns
 - Designing screens without designing the flow between them.
 - Forgetting empty/error states. - Multiple competing CTAs.
-- Writing React (that's developer). - Inventing hex values (tokens exist; that's frontend-design's domain).
+- Writing production UI code (that's developer). - Inventing hex values (tokens exist; that's frontend-design's domain).
 - "Just make it pretty" with no structural spec.
 
 ## Boundary
