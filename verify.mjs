@@ -255,7 +255,7 @@ const EXPORTS = [
   'weightedTotal', 'configFor', 'normalizeDir', 'cleanDefects', 'dedupe', 'defectKey',
   'blockingOpen', 'auditMaker', 'makerPrompt', 'checkerPrompt', 'arbiterPrompt',
   'escalationPrompt', 'rubricTable', 'conventions', 'runLoop', 'arbitrate', 'buildSlices', 'walk',
-  'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt',
+  'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt', 'spawn', 'SPAWN_RETRIES',
   'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs',
 ]
 const ARGS = {
@@ -416,6 +416,15 @@ check(/await parallel\(batch\.map/.test(src), 'independent slices within a level
 check(src.includes('git worktree add ${wt}'), 'a concurrently-built slice gets its OWN worktree  [R-BUILD-07]')
 check(src.includes('git worktree remove --force'), 'and the worktrees are released when building ends  [R-BUILD-07]')
 check(!/WORKTREES = `\$\{DIR\}/.test(src), 'worktrees live OUTSIDE the feature dir the report node commits  [R-REP-03]')
+// [SD-04] Outside the feature dir was not enough: anywhere INSIDE the repo is invisible to git but
+// visible to the project's test runner, which then renders against a second copy of its framework.
+check(/const WORKTREES = `\.\.\//.test(src), 'worktrees live OUTSIDE THE REPOSITORY, not merely outside .sdlc2/  [R-BUILD-07a]')
+check(!/const WORKTREES = `\.sdlc2\/worktrees/.test(src), 'and specifically not back under .sdlc2/worktrees/, which run 2 measured as broken  [R-BUILD-07a]')
+check(/WORKTREES = `[^`]*\$\{RUN_ID\}/.test(src), 'each run gets its own worktree container, so a stranded tree cannot collide  [R-BUILD-07a]')
+// `rm -rf` DOES appear in the source — inside the prohibition. Assert the prohibition, not its
+// absence, or this check passes the moment someone deletes the warning that makes it safe.
+check(/rmdir/.test(src), 'the release step removes the empty container with rmdir  [R-BUILD-07a]')
+check(/never \\`rm -rf\\`/.test(src), 'and says never rm -rf, in the instruction itself  [R-BUILD-07a]')
 check(/agentPrefix/.test(src) && /function at\(/.test(src), 'agent types are resolved through a host-configurable prefix')
 // `git merge-base` is read-only plumbing — it is how the tester PROVES a branch was cut where the
 // engine said, which is the opposite of merging. Exclude it by name rather than loosening the grep.
@@ -820,6 +829,77 @@ await probe('E-01 plateau exit', async () => {
   check(r.history.length === 3, 'the score history records every round it did spend  [R-LOOP-09]')
 })
 
+// P18b — [SD-05 / R-LOOP-11] a spawn that never answered is transport, not content. It retries
+// once for free; a maker that ANSWERS badly is untouched and still costs its round.
+await probe('SD-05 transport retry', async () => {
+  // (a) one free retry, and the recovered answer is the one that is used.
+  let calls = 0
+  const E1 = engine({ agent: async () => { calls++; return calls === 1 ? null : { ok: true, recovered: true } } })
+  const got = await E1.spawn('p', { label: 'ux:make' })
+  check(calls === 2, `a spawn that returns null is retried (called ${calls}x)  [R-LOOP-11]`)
+  check(got && got.recovered === true, 'and the retry\'s answer is what the caller receives  [R-LOOP-11]')
+
+  // (b) a throw is transport too — the engine must not die on it.
+  let thrown = 0
+  const E2 = engine({ agent: async () => { thrown++; if (thrown === 1) throw new Error('API Error: Connection lost mid-response'); return { ok: true } } })
+  const rec = await E2.spawn('p', { label: 'ux:make' })
+  check(rec && rec.ok === true, 'a spawn that THROWS is retried too, not propagated  [R-LOOP-11]')
+
+  // (c) the retry is bounded — a permanently dead spawn returns null rather than looping.
+  let dead = 0
+  const E3 = engine({ agent: async () => { dead++; return null } })
+  const none = await E3.spawn('p', { label: 'ux:make' })
+  check(none === null, 'a permanently dead spawn gives up and returns null  [R-LOOP-11]')
+  check(dead === E3.SPAWN_RETRIES + 1, `and is bounded at ${E3.SPAWN_RETRIES + 1} attempt(s), not infinite (made ${dead})  [R-LOOP-11]`)
+
+  // (d) a maker that never answers is `errored`, not `rejected`, and its defect is a HARNESS
+  //     defect — so the next round's maker is never asked to repair a non-answer.
+  const said = []
+  const E4 = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      const L = o.label || ''
+      said.push({ label: L, prompt: p })
+      if (L.startsWith('po:make')) return null
+      return {}
+    },
+  })
+  const r = await E4.runLoop(E4.NODES.po)
+  const errored = (r.history || []).filter((h) => h.errored === true)
+  check(errored.length > 0, 'an unanswered maker is recorded as errored  [R-LOOP-11]')
+  check(errored.every((h) => h.note === 'maker spawn errored'), 'and never as "maker output rejected"  [R-LOOP-11]')
+  check(!(r.history || []).some((h) => h.note === 'maker output rejected'), 'the two are not conflated  [R-LOOP-11]')
+  const makes = said.filter((x) => x.label.startsWith('po:make'))
+  check(makes.length === E4.NODES.po.rounds * (E4.SPAWN_RETRIES + 1), `each round retried once before being charged (${makes.length} spawns for ${E4.NODES.po.rounds} rounds)  [R-LOOP-11]`)
+  const second = (makes[2] || {}).prompt || ''
+  check(!/Fix EVERY defect/.test(second), 'and the next maker is not asked to repair its own non-answer  [R-LOOP-08]')
+  check(/harness failure/.test(second), 'it is told the round could not be scored  [R-LOOP-08]')
+})
+
+// P18c — [SD-07 / R-ARCH-03] issues/ owns the dependency queue. The architect may disagree with
+// it; it may not declare a different one downstream, where only one of the two graphs is read.
+await probe('SD-07 queue single source of truth', async () => {
+  const m = M.NODES.architect.mandate
+  check(/issues\//.test(m) && /single source of truth/i.test(m), 'the architect mandate names issues/ as the queue\'s single source of truth  [R-ARCH-03]')
+  check(/MUST NOT assert a dependency edge/i.test(m) || /MUST NOT.*dependency edge/i.test(m), 'and forbids design.md asserting an edge issues/ does not carry  [R-ARCH-03]')
+  check(/product-owner node|po node/i.test(m), 'and routes the disagreement to the product-owner node instead  [R-ARCH-03]')
+  check(/not even one you are right about/i.test(m), 'including one the architect is right about — being correct is not the exception  [R-ARCH-03]')
+
+  const q = M.RUBRICS.arch.criteria.find((c) => c.id === 'AR-QUEUE')
+  check(!!q, 'the arch rubric carries a criterion that scores it  [R-ARCH-03]')
+  check(!!q && /Blocked by:/.test(q.text), 'and tells the critic to actually read the Blocked by: lines  [R-ARCH-03]')
+  check(!!q && /0\.0 = design\.md declares a `Blocked by:` edge absent from issues\//.test(q.anchors), 'with a 0.0 anchor that is the exact run-2 failure  [R-ARCH-03]')
+
+  const design = M.NODES.architect.outputs.find((o) => o.path.endsWith('design.md'))
+  check(!!design && /issues\/ owns it/.test(design.note), 'design.md\'s own output note says issues/ owns the queue  [R-ARCH-03]')
+  check(/issues\//.test(M.NODES.architect.checkers[0].lens), 'and the critic\'s lens points at it  [R-ARCH-03]')
+
+  // The engine must still read ONLY issues/ — the whole defect was an artifact nobody reads.
+  const branchOf = { '01-a': 'slice/demo/01-a', '02-b': 'slice/demo/02-b' }
+  const order = { '01-a': 0, '02-b': 1, '03-c': 2 }
+  check(M.baseFor({ id: '03-c', blockedBy: ['01-a'] }, branchOf, order) === 'slice/demo/01-a', 'baseFor still reads the issue\'s blockedBy, nothing else  [R-ARCH-03]')
+})
+
 // P19 — [E-04] the build arbiter never commits, and a slice ships the sha the TESTER verified.
 // Also [E-07]: with an install command declared, independent slices build in parallel worktrees.
 await probe('E-04 arbiter cannot commit · E-07 lanes', async () => {
@@ -852,7 +932,8 @@ await probe('E-04 arbiter cannot commit · E-07 lanes', async () => {
   check(/git worktree add/.test(dev), 'with lanes open, a slice builds in its own worktree  [E-07]')
   check(/npm ci/.test(dev), 'and installs dependencies there before testing  [E-07]')
   const tst = (said.find((x) => x.label.startsWith('test:01-a')) || {}).prompt || ''
-  check(/git -C \.sdlc2\/worktrees\/demo\/01-a/.test(tst), 'and the tester judges THAT tree, not the session checkout  [R-BUILD-07]')
+  check(/git -C \.\.\/\.sdlc2-worktrees\/demo-r\/01-a/.test(tst), 'and the tester judges THAT tree, not the session checkout  [R-BUILD-07]')
+  check(/\.\.\//.test(tst), 'and that tree is OUTSIDE the repo, so the project test runner cannot collect it  [SD-04]')
   check(said.some((x) => x.label === 'worktrees:release'), 'the worktrees are released when building ends  [E-07]')
 })
 

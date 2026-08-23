@@ -16,13 +16,26 @@ graph keeps going: it documents instead of stalling. One thing is never arbitrab
 suite**. No arbiter, no score, no deadline commits over it — and the arbiter cannot commit either,
 so the sha a slice ships is the sha a tester actually passed.
 
-**Status: v0.1.3 — executed once, then tuned for what that execution cost.** One feature went through the whole graph on 2026-08-16: four
-slices shipped, two nodes soft-passed, fourteen human-verify records came out the other end. It
-also found two things 205 green checks had not — a developer that ignored which branch to build
-on, and a bundled skill whose one line sent three personas to the host's skills — both fixed here,
-both now asserted.
+**Status: v0.1.4 — executed twice, and the second run is the one that proved the first fix.**
+Run 1 (2026-08-16) put a feature through the whole graph: four slices shipped, two nodes
+soft-passed, fourteen human-verify records came out the other end. It found two things 205 green
+checks had not — a developer that ignored which branch to build on, and a bundled skill whose one
+line sent three personas to the host's skills.
 
-v0.1.3 is the answer to the other thing run 1 showed: the graph was *slow*, and the cost was not
+Run 2 (2026-08-22) was the acceptance test for the fix, and it took three attempts to build a
+feature that could even *test* it. The invariant is "slices that are siblings in the declared
+graph are siblings in git", and its sharp form is a **negative**: `git merge-base --is-ancestor`
+between two siblings must **fail**. Run 1 could not assert that — with four independent slices,
+every stacking was vacuously consistent. Nor could the next attempt, whose product-owner cut a
+pure chain. Only a genuine diamond can falsify it. Run 2 produced one, and every negative held.
+
+That run cost three more defects, all of them things reading had not found: worktrees that were
+invisible to git and perfectly visible to the project's test runner, a dropped TCP connection
+scored as a critical defect against the maker's work, and an architect declaring a dependency
+edge in the one artifact the build engine does not read. All three are fixed here, all three now
+asserted.
+
+v0.1.3 was the answer to the other thing run 1 showed: the graph was *slow*, and the cost was not
 where it looked. Engine prompts measure 600–1400 tokens, so prompt size was never the problem —
 the count of serial agent calls was. Document nodes burned all five rounds every time under a bar
 that good work missed, while the loop threw away the per-criterion scores between rounds and

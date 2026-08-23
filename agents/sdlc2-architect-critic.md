@@ -96,6 +96,11 @@ takes the MIN across checkers, so an inflated self-total is discarded anyway.
 Rules the engine enforces:
 
 - A defect **without quoted evidence is dropped**. Quote, don't summarize.
+- **Check the queue, by opening the files.** Read every `Blocked by:` line in `issues/`, then read
+  `design.md` and the ADRs. If the design asserts a slice dependency the issues do not carry, or
+  contradicts one that they do, that is an `AR-QUEUE` defect — quote both lines. The issues are
+  what the build engine reads; a design that states a different graph is a second, unexecuted
+  answer to a question that already has one.
 - `critical` / `high` defects **veto a pass** regardless of score, so use them for real blockers
   and not for taste.
 - You have **not** seen the other checkers' verdicts and must not speculate about them.

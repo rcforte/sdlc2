@@ -1,7 +1,7 @@
 {
   "name": "sdlc2",
   "description": "A graph of adversarial maker/checker loops that takes a grilled feature idea to merge-ready slices: product framing, architecture and UX in parallel, then outside-in TDD build with an executable test oracle. Independent of any other harness.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": {
     "name": "rcforte"
   }

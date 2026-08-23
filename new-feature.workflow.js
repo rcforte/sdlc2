@@ -35,10 +35,21 @@ const MOCKUP = `${DIR}/mockup.html`
 const DESIGN = `${DIR}/design.md`
 const ISSUES = `${DIR}/issues`
 const REPORT = `${DIR}/runs/${RUN_ID}.md`
-// [E-07] Where a concurrently-built slice gets its own working tree. Deliberately NOT under
-// `${DIR}`: the report node commits that path, and a worktree swept into the paperwork commit
-// would be a disaster. The target repo must gitignore `.sdlc2/worktrees/` — see SETUP.md.
-const WORKTREES = `.sdlc2/worktrees/${FEATURE}`
+// [E-07] Where a concurrently-built slice gets its own working tree. [SD-04] Deliberately OUTSIDE
+// the repository, as a sibling of it. Two earlier locations were wrong for two different reasons:
+// under `${DIR}` the report node would sweep a worktree into the paperwork commit, and under
+// `.sdlc2/worktrees/` — anywhere inside the repo — a worktree is invisible to git (gitignored) but
+// still perfectly visible to the project's own TEST RUNNER. Measured in the lab: vitest collected
+// three sibling worktrees' suites from the main checkout and rendered every component against a
+// second copy of React — 16 files, 98 failures, all `Invalid hook call`. Gitignoring them was only
+// half the decision; a checkout of this repo is one project, not N+1. A path outside the repo
+// removes the whole class instead of asking every project to configure its runner around us.
+//
+// Relative, not absolute: the engine is sandboxed (no filesystem, no `os.tmpdir`), and `../` is
+// the one escape that is portable across the platforms install.sh and install.ps1 both target.
+// `${RUN_ID}` makes each run's trees unique, so a worktree stranded by an aborted run can never
+// collide with this one — `git worktree add` fails loudly on an existing path.
+const WORKTREES = `../.sdlc2-worktrees/${FEATURE}-${RUN_ID}`
 
 const ROUNDS = 5 // max build attempts per slice — its extra attempts only cost on failure
 // [E-01] The DOCUMENT nodes get 2. Measured on run 1: all three burned all 5 rounds and went to an
@@ -235,11 +246,16 @@ const RUBRICS = {
   arch: {
     threshold: 0.8, // [E-03] — same reasoning as po
     criteria: [
-      { id: 'AR-BOUND', weight: 0.3, text: 'Aggregate and context boundaries are correct: every invariant is owned in exactly one place, and no operation spans two aggregates transactionally.', anchors: '0.0 = invariants scattered or a cross-aggregate transaction; 0.5 = boundaries named but an invariant\'s owner is ambiguous; 1.0 = each invariant has one owner, stated.' },
-      { id: 'AR-SEAM', weight: 0.25, text: 'The outer acceptance-test seam each slice will be driven through is named and reachable, and ports/adapters are explicit.', anchors: '0.0 = no seam named; 0.5 = a seam for the feature but not per slice; 1.0 = per slice, matching the project\'s declared seam.' },
+      { id: 'AR-BOUND', weight: 0.28, text: 'Aggregate and context boundaries are correct: every invariant is owned in exactly one place, and no operation spans two aggregates transactionally.', anchors: '0.0 = invariants scattered or a cross-aggregate transaction; 0.5 = boundaries named but an invariant\'s owner is ambiguous; 1.0 = each invariant has one owner, stated.' },
+      { id: 'AR-SEAM', weight: 0.22, text: 'The outer acceptance-test seam each slice will be driven through is named and reachable, and ports/adapters are explicit.', anchors: '0.0 = no seam named; 0.5 = a seam for the feature but not per slice; 1.0 = per slice, matching the project\'s declared seam.' },
       { id: 'AR-ADR', weight: 0.2, text: 'Each significant decision is an ADR with options considered, the decision, its consequences, and why the alternatives were rejected.', anchors: '0.0 = decisions asserted with no alternatives; 0.5 = ADRs without rejected options or consequences; 1.0 = complete.' },
-      { id: 'AR-FIT', weight: 0.15, text: 'Consistent with the existing codebase and its conventions; any new pattern or dependency is justified rather than incidental.', anchors: '0.0 = a new stack/style with no rationale; 0.5 = consistent but unexamined; 1.0 = consistent, deviations argued.' },
-      { id: 'AR-SLICE', weight: 0.1, text: 'Each queued slice is implementable end-to-end against that seam in one sitting.', anchors: '0.0 = slices that cannot compile alone; 0.5 = plausible but unexamined; 1.0 = each slice traced to the seam it drives.' },
+      { id: 'AR-FIT', weight: 0.12, text: 'Consistent with the existing codebase and its conventions; any new pattern or dependency is justified rather than incidental.', anchors: '0.0 = a new stack/style with no rationale; 0.5 = consistent but unexamined; 1.0 = consistent, deviations argued.' },
+      // [SD-07] The engine cannot read the disk, so the only place this can be caught is a checker
+      // that can. Run 2's architect declared slice 04 blocked by 02 in design.md while the issue
+      // said "Not blocked by 02"; `baseFor()` reads issues/, so the engine ignored it and the
+      // diamond survived by luck. Had it been honoured, the run's whole point would have collapsed.
+      { id: 'AR-QUEUE', weight: 0.1, text: 'design.md and the ADRs assert NO slice dependency that issues/ does not already declare. Open every issue file, read its `Blocked by:` line, and compare. A disagreement with the queue is raised as a defect against the product-owner node and a human-verify record naming the issue to amend — never as an edge declared here.', anchors: '0.0 = design.md declares a `Blocked by:` edge absent from issues/, or contradicts one that is there; 0.5 = no contradiction, but the design restates the graph so the two can drift; 1.0 = issues/ is the only place the queue is stated, and any disagreement is filed against the po node instead.' },
+      { id: 'AR-SLICE', weight: 0.08, text: 'Each queued slice is implementable end-to-end against that seam in one sitting.', anchors: '0.0 = slices that cannot compile alone; 0.5 = plausible but unexamined; 1.0 = each slice traced to the seam it drives.' },
     ],
   },
   ux: {
@@ -300,17 +316,17 @@ const NODES = {
     kind: 'loop',
     phase: 'Design',
     mandate:
-      'Design the domain model and the boundaries this feature needs, name the outer acceptance-test seam for EACH slice, and record the decisions as ADRs. Do not touch feature.md, mockup.html, or any issue\'s acceptance criteria — disagreement with the product framing is a human-verify record, not an edit.',
+      'Design the domain model and the boundaries this feature needs, name the outer acceptance-test seam for EACH slice, and record the decisions as ADRs. Do not touch feature.md, mockup.html, or any issue\'s acceptance criteria — disagreement with the product framing is a human-verify record, not an edit. [SD-07] THE DEPENDENCY QUEUE IS NOT YOURS TO DECLARE: the `Blocked by:` lines in issues/ are the single source of truth, they are what the build node actually reads, and design.md MUST NOT assert a dependency edge that issues/ does not already carry — not even one you are right about. If a slice needs a blocker its issue does not declare, that is a DEFECT to raise against the product-owner node, in `disputed` and as a human-verify record naming the issue file to amend. Declaring the edge downstream instead produces two artifacts of the same run asserting different graphs, with only one of them executable.',
     maker: { agent: 'sdlc2-architect', model: 'opus', effort: 'high' },
     checkers: [
-      { agent: 'sdlc2-architect-critic', model: 'opus', effort: 'xhigh', lens: 'boundaries, invariants, seam reachability, ADR completeness', arbitrable: true },
+      { agent: 'sdlc2-architect-critic', model: 'opus', effort: 'xhigh', lens: 'boundaries, invariants, seam reachability, ADR completeness, and fidelity to the queue declared in issues/', arbitrable: true },
     ],
     arbiter: { agent: 'sdlc2-architect', model: 'opus', effort: 'high' },
     rubric: 'arch',
     rounds: DOC_ROUNDS,
     inputs: [SEED, ISSUES, VH],
     outputs: [
-      { path: DESIGN, kind: 'design', note: 'domain model · boundaries · ports · THE SEAM PER SLICE' },
+      { path: DESIGN, kind: 'design', note: 'domain model · boundaries · ports · THE SEAM PER SLICE. Do NOT restate or amend the slice dependency graph here — issues/ owns it [SD-07]' },
       { path: 'docs/adr/NNNN-<slug>.md', kind: 'adr', note: 'one per significant decision; options, decision, consequences, why the alternatives lost' },
     ],
     when: null,
@@ -465,6 +481,34 @@ function dedupe(defects) {
 // emits. Default (no second argument) is the strict form, so every existing caller is unchanged.
 function blockingOpen(defects, docNode) {
   return defects.filter((d) => d.severity === 'critical' || (!docNode && d.severity === 'high'))
+}
+
+// [SD-05] Every spawn in this engine goes through here. `agent()` answers with `null` when the
+// subagent dies on a terminal API error after the harness's own retries, and can throw outright;
+// run 2 lost a node's clean pass to one dropped connection — `[ux:make (2/2)] failed: API Error:
+// Connection lost mid-response` reached the loop as an empty result, was scored as the critical
+// defect "maker agent returned nothing", consumed the round budget, and soft-passed the node at
+// 0.79 against a 0.80 bar with two VH records for a human to read. One round from passing on
+// content, and the round that would have done it was spent on the network.
+//
+// So: an agent that never ANSWERED has not made a mistake worth a defect record. Retry it once,
+// free, before anything upstream charges it a round. An agent that answers badly is untouched by
+// this — that is content, it is what the checkers are for, and it still costs a round.
+const SPAWN_RETRIES = 1
+async function spawn(prompt, opts) {
+  const label = (opts && opts.label) || 'spawn'
+  for (let tryN = 0; tryN <= SPAWN_RETRIES; tryN++) {
+    let out = null
+    try {
+      out = await agent(prompt, opts) // the ONLY bare agent() call in the engine — everything else goes through spawn
+    } catch (e) {
+      out = null
+      if (tryN >= SPAWN_RETRIES) log(`${label}: spawn threw (${(e && e.message) || e}) — giving up after ${tryN + 1} attempt(s).`)
+    }
+    if (out) return out
+    if (tryN < SPAWN_RETRIES) log(`${label}: the spawn never answered — retrying once. This is transport, not content, so the round is NOT charged.`)
+  }
+  return null
 }
 
 function engineDefect(location, evidence, fix, severity) {
@@ -735,7 +779,7 @@ async function runLoop(node) {
     let binaryFailed = false
     let hard = false
 
-    maker = await agent(makerPrompt(node, round, defects, prevScores), {
+    maker = await spawn(makerPrompt(node, round, defects, prevScores), {
       agentType: at(node.maker.agent),
       model: node.maker.model,
       effort: node.maker.effort,
@@ -744,8 +788,20 @@ async function runLoop(node) {
       phase: node.phase,
     })
 
-    // [R-LOOP-08] A null or incomplete maker consumes a round and earns a synthetic critical
-    // defect. It never retries for free.
+    // [SD-05] A maker that never ANSWERED is a transport failure, not a content one. `spawn` has
+    // already retried it for free; reaching here means the retry failed too. It still costs the
+    // round — otherwise the loop cannot terminate — but it is recorded as `errored`, never
+    // `rejected`, so the score history stays readable, and the defect is a HARNESS defect so the
+    // next round's maker is never handed "you returned nothing" as work to repair.
+    if (!maker) {
+      defects = [harnessDefect(node.id, 'the maker spawn never answered — a transport failure, already retried once', 're-run the node')]
+      history.push({ round: round, score: null, defects: 1, open: 1, note: 'maker spawn errored', errored: true })
+      log(`${label} round ${round}/${node.rounds}: the maker spawn never answered — recorded as errored, not as a defect in its work.`)
+      continue
+    }
+
+    // [R-LOOP-08] A maker that DID answer and answered badly — `ok: false`, or missing a declared
+    // artifact — consumes a round and earns a synthetic critical defect. It never retries for free.
     const makerFaults = auditMaker(node, maker)
     if (makerFaults.length) {
       defects = makerFaults
@@ -763,7 +819,7 @@ async function runLoop(node) {
     // defect and, for the binary checker, a failure. [R-LOOP-03]
     const verdicts = await parallel(
       node.checkers.map((c) => () =>
-        agent(checkerPrompt(node, c, round, prevScores), {
+        spawn(checkerPrompt(node, c, round, prevScores), {
           agentType: at(c.agent),
           model: c.model,
           effort: c.effort,
@@ -858,7 +914,7 @@ async function runLoop(node) {
 
 // [R-LOOP-07] Exactly one arbiter call per node, and its verdict is soft-pass — never pass.
 async function arbitrate(node, result) {
-  const decision = await agent(arbiterPrompt(node, result.defects, result.rounds), {
+  const decision = await spawn(arbiterPrompt(node, result.defects, result.rounds), {
     agentType: at(node.arbiter.agent),
     model: node.arbiter.model,
     effort: node.arbiter.effort,
@@ -1085,7 +1141,7 @@ async function buildSlices(node) {
     results.po && results.po.maker && Array.isArray(results.po.maker.slices)
       ? results.po.maker.slices.filter((x) => x && x.id && x.path && x.title)
       : []
-  const plan = manifest.length ? { slices: manifest } : await agent(
+  const plan = manifest.length ? { slices: manifest } : await spawn(
     `Enumerate the queued slices for feature "${FEATURE}".\n\n` +
       `Read every file in ${ISSUES}/ (they were written by the product-owner node). For each, return:\n` +
       `  id        — the NN-slug from the filename\n` +
@@ -1209,7 +1265,7 @@ async function buildSlices(node) {
 
     while (attempt < rounds) {
       attempt++
-      const build = await agent(developerPrompt(slice, cfg, defects, attempt, rounds, base, wt), {
+      const build = await spawn(developerPrompt(slice, cfg, defects, attempt, rounds, base, wt), {
         agentType: at(node.maker.agent),
         model: node.maker.model,
         effort: node.maker.effort,
@@ -1227,11 +1283,11 @@ async function buildSlices(node) {
       lastGood = build
 
       const verdicts = await parallel([
-        () => agent(testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt), {
+        () => spawn(testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt), {
           agentType: at(testerRole.agent), model: testerRole.model, effort: testerRole.effort,
           schema: verdictSchema(testerRole), label: `test:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
-        () => agent(reviewerPrompt(slice, cfg, base, wt), {
+        () => spawn(reviewerPrompt(slice, cfg, base, wt), {
           agentType: at(reviewRole.agent), model: reviewRole.model, effort: reviewRole.effort,
           schema: verdictSchema(reviewRole), label: `review:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
         }),
@@ -1298,7 +1354,7 @@ async function buildSlices(node) {
     }
 
     // Tests green, craft findings survived → arbiter may accept the debt and keep the commit.
-    const decision = await agent(buildArbiterPrompt(slice, defects, rounds), {
+    const decision = await spawn(buildArbiterPrompt(slice, defects, rounds), {
       agentType: at(node.arbiter.agent), model: node.arbiter.model, effort: node.arbiter.effort,
       schema: ARBITER, label: `arbiter:${slice.id}`, phase: node.phase,
     })
@@ -1369,17 +1425,20 @@ async function buildSlices(node) {
     }
   }
 
-  // [E-07] Release the worktrees. They live under `.sdlc2/worktrees/`, which the target repo must
-  // gitignore — left behind they would fail the NEXT run's clean-tree pre-check, and a branch is
-  // still checked out in each of them, so the main tree cannot check that branch out. Removing a
-  // worktree does not touch its branch: the slice branches are the deliverable and they survive.
+  // [E-07] Release the worktrees. [SD-04] They live OUTSIDE the repo now, so a stranded one no
+  // longer dirties the tree or pollutes the test runner — but it still holds a branch checked out,
+  // and the main tree cannot check that branch out while it does. Removing a worktree does not
+  // touch its branch: the slice branches are the deliverable and they survive.
   if (worktrees.length) {
     log(`Releasing ${worktrees.length} slice worktree(s).`)
-    await agent(
+    await spawn(
       `Release the sdlc2 slice worktrees for feature "${FEATURE}". For EACH path below run\n` +
         `\`git worktree remove --force <path>\`, then run \`git worktree prune\` once:\n` +
         pathList(worktrees) +
-        `\n\nThen confirm with \`git worktree list\` that only the main checkout remains, and with\n` +
+        `\n\nThese paths are OUTSIDE this repository, one directory up — that is deliberate, not a\n` +
+        `mistake to correct. After the removals, delete the now-empty container \`${WORKTREES}\`\n` +
+        `if and only if it is empty (\`rmdir\` it — never \`rm -rf\`, and never its parent).\n` +
+        `\nThen confirm with \`git worktree list\` that only the main checkout remains, and with\n` +
         `\`git branch --list 'slice/${FEATURE}/*'\` that every slice branch is STILL THERE — the\n` +
         `branches are the deliverable; only their working trees are disposable.\n` +
         `Do NOT delete any branch, do not touch '${BASE}', and do not commit anything. If a removal\n` +
@@ -1394,7 +1453,7 @@ async function buildSlices(node) {
   if (escalations.length) {
     log(`Writing ${escalations.length} escalation note(s).`)
     await parallel(escalations.map((e) => () =>
-      agent(escalationPrompt(e.slice, e.reason, e.attempt, e.defects), {
+      spawn(escalationPrompt(e.slice, e.reason, e.attempt, e.defects), {
         model: 'sonnet', effort: 'low', label: `escalate:${e.slice.id}`, phase: node.phase,
       })
     ))
@@ -1437,7 +1496,7 @@ async function writeReport(node) {
     for (const d of results[id].disputed || []) disputed.push({ node: id, criterion: d.criterion, why: d.why })
   }
 
-  await agent(
+  await spawn(
     `Write the sdlc2 run report to ${REPORT} (create the directory if needed). It is the only file\n` +
       `you AUTHOR — you also commit files other nodes already wrote, per the last section, but you\n` +
       `edit none of them. Use exactly this data — invent nothing:\n\n` +
@@ -1450,7 +1509,10 @@ async function writeReport(node) {
       `followed by a per-round score line for every node that used MORE THAN HALF its rounds, taken\n` +
       `from that node's \`history\` (e.g. \`po: 0.71 → 0.74 → 0.74 → 0.80 → 0.84\`, with the defect\n` +
       `count in brackets). Say which way it went — climbing means convergence that ran out of\n` +
-      `rounds, flat or oscillating means the loop is thrashing. Do not diagnose further;\n` +
+      `rounds, flat or oscillating means the loop is thrashing. Do not diagnose further.\n` +
+      `[SD-05] A round carrying \`errored: true\` is NOT a maker that collapsed — it is a spawn that\n` +
+      `never answered, already retried once, i.e. infrastructure. Write it as \`errored\`, never as\n` +
+      `\`rejected\`, and do not count it against the maker's work or read a trend through it;\n` +
       `(2) a slice table — slice · attempts · verdict · branch@sha · cut from (the \`base\` field) ·\n` +
       `review score · reason. A \`base\` that is another slice's branch means the slice was stacked\n` +
       `on the blocker it declared; say so rather than leaving the reader to infer it;\n` +

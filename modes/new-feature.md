@@ -24,11 +24,17 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    itself on the next call. If you are not rooted at the repo you mean to build in, **stop** and
    say it must be relaunched there.
 
-   Then: **worktree hygiene.** If the repo does not **ignore** `.sdlc2/worktrees/` — and whatever
-   path this harness puts its own agent worktrees in, commonly `.claude/worktrees/` — say so and
-   offer to add both to `.gitignore` before continuing. A worktree is created inside the
-   repository, so an un-ignored one shows up as untracked: it fails the clean-tree check below on
-   the next run, and can be swept into a slice commit on this one.
+   Then: **worktree hygiene.** sdlc2 builds concurrent slices in worktrees **outside** this repo
+   (`../.sdlc2-worktrees/`), so its own trees need no ignore rule and are invisible to your test
+   runner. What still needs one is whatever path *this harness* puts its own agent worktrees in,
+   commonly `.claude/worktrees/`: those are created inside the repository, so an un-ignored one
+   shows up as untracked, fails the clean-tree check below on the next run, and can be swept into
+   a slice commit on this one. If it is not ignored, say so and offer to add it to `.gitignore`
+   before continuing.
+
+   Also confirm the parent directory is writable — `../.sdlc2-worktrees/` is created there — and
+   note that a *stale* `../.sdlc2-worktrees/` from an aborted run is harmless: each run stamps its
+   own `<feature>-<runId>` container, so paths never collide.
 
    Then: the repo is a git repo and `git status --porcelain` is **empty**. A dirty tree stops
    the run (slices commit; stray changes would be swept into them). Resolve the default branch:

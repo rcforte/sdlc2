@@ -4,21 +4,38 @@
 
 ## Do this first
 
-**Step 5: v0.1.4 — fix what run 2 found.** Run 2 is **done**: `saved-name`,
-run `nf-20260822T2305Z`, five slices, executed against **0.1.3** in a lab session. The findings
-are filed in the lab at `~/dev/code/sdlc2-lab/docs/harness-findings.md` (SD-01 … SD-07). Three of
-them are sdlc2 defects and belong here, plus one carried-over recommendation:
+**Step 6: run 3 — the acceptance test for v0.1.4.** v0.1.4 is **written and green** (289 checks,
+was 262) but **has never run against real agents** — the same trap as run 1, v0.1.2 and v0.1.3,
+three for three. Before run 3 exercises any of it: `git push`, then
+`claude plugin marketplace update sdlc2-marketplace`, then
+`claude plugin update sdlc2@sdlc2-marketplace`, then **restart** — a session pins its plugin root
+at start (SD-03), so an update without a restart changes nothing.
 
-| id | severity | what to change here |
+What v0.1.4 changed, and what run 3 has to confirm about each:
+
+| id | fix | what run 3 must show |
 |---|---|---|
-| **SD-04** | high | Parallel lanes break the declared test command. Worktrees live **inside** the repo (`.sdlc2/worktrees/`), each with its own `node_modules`, so the project's own test runner collects them: measured **16 files / 98 failures**, every one `Invalid hook call` from a second React copy. Gitignoring them was only half the fix. **Preferred: move worktrees outside the repo** (sibling temp dir) and the whole class disappears. Otherwise `SETUP.md` + pre-check 4 must require a runner-level exclusion (`test.exclude` / `testPathIgnorePatterns` / `norecursedirs`), and the lane setup should verify the baseline suite passes *inside* a worktree before handing slices to it. |
-| **SD-05** | medium | A **transport failure is scored as a content defect**. `[ux:make (2/2)] failed: API Error: Connection lost mid-response` reached the checker as an empty artifact; it recorded "maker agent returned nothing" as critical, the round budget was spent, and the node soft-passed at 0.79 with two VH records. The engine can tell the difference — a thrown API error, not a returned-empty result — so **retry at the transport layer before charging a round**, and mark such a round `errored`, distinct from `rejected`, so the score history stays readable. |
-| **SD-07** | medium | The **architect can declare a dependency edge that contradicts the `po`'s issues, silently.** It judged slice 04 to need slice 02 and wrote that into `design.md`/ADR-0025 instead of amending the issue. `baseFor()` reads `issues/`, so the engine ignored it — **had it not, this run's diamond would have collapsed into a chain**, reproducing SD-01's symptom through a different door. Make `issues/` the single source of truth and say so in the architect's prompt; cheapest guard is to assert after the design node that every `Blocked by:` edge in `design.md` exists in `issues/`. |
-| **SD-03** | — | Still unimplemented: **the run report does not name the engine it ran.** Verified by grep against run 2's report — no `pluginRoot`, no `VERSION`. This is the finding that cost ~6.3M tokens of runs 1 and the 0327Z run measuring a superseded engine. Cheapest high-value change left. |
+| **SD-04** | Worktrees moved **outside** the repo — `../.sdlc2-worktrees/<feature>-<runId>/<slice>`, `[R-BUILD-07a]` | Lanes still start concurrently; the declared test command reports the project's OWN file count, not N+1; `git worktree list` shows only the main checkout at the end; the empty container is `rmdir`ed |
+| **SD-05** | Every spawn goes through `spawn()`, which retries a no-answer **once, free**, before a round is charged; the round is recorded `errored`, not `rejected`, and the defect is a *harness* defect. `[R-LOOP-11]` | A transport failure no longer costs a node its pass. The tell in the history is a round marked `errored` — and if one appears, check the node still had its full round budget for content |
+| **SD-07** | `issues/` is the single source of truth for the queue: the architect mandate, the persona, `design.md`'s output note and the new **`AR-QUEUE`** rubric criterion all say so. `[R-ARCH-03]` | `design.md` asserts no `Blocked by:` edge absent from `issues/`. If the architect disagrees with the queue it must show up as a defect against the `po` node, not as an edge downstream |
+
+Still NOT done, and still the cheapest fix outstanding:
+
+- **SD-03** — the run report still does not name the engine it ran. No `pluginRoot`, no `VERSION`,
+  verified by grep against run 2's report. This is the finding that cost ~6.3M tokens of runs
+  measuring a superseded engine. One line in `[R-REP-01]`.
+
 
 SD-06 (a background workflow makes no progress while the session sits idle — 3h 01m of dead time
 inside a 4h 41m run) is a **harness** issue, not sdlc2's. Nothing to fix here; it does mean any
 wall-clock number from run 2 is meaningless, and that a graph run should not be left unattended.
+
+**Run 3 needs a seed of its own.** `saved-name` is spent, and its diamond has already made its
+point. What v0.1.4 has not been given a shape to test: the **veto-round question** (still no data
+after two runs), the **plateau exit** (never fired), and `hasUiStories` (still unenforced). None of
+those need a diamond — they need a doc node that struggles, which is not something a seed can order
+up. Reuse the diamond recipe under *What run 2 settled* anyway: it is what makes lanes do anything,
+and lanes are what SD-04 changed.
 
 ## What run 2 settled
 
@@ -80,8 +97,9 @@ Also confirmed working, per the lab's findings file:
 | 3 | Fix what step 2 reveals, plus Part 0 | **done** — v0.1.2, 220 checks green |
 | 3b | *(unplanned)* `greeting-log` run + v0.1.3 | **done** — `nf-20260822T0327Z`; revealed SD-03, prompted `sdlc2-enhance-1.md` → v0.1.3. Seed cut a pure chain, so it could not test the fix |
 | 4 | **Run 2 proper: 0.1.3, lab session, diamond seed** | **done** — `nf-20260822T2305Z` (`saved-name`), 5 slices, 1 soft-pass, 6 VH records resolved and merged to lab `main`. `[R-BUILD-04a]` confirmed |
-| 5 | **v0.1.4 — fix SD-04, SD-05, SD-07 + print the engine version** | **next** |
-| 6 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
+| 5 | **v0.1.4 — fix SD-04, SD-05, SD-07** | **done** — all three fixed, 289 checks green (was 262). SD-03's version line is NOT done |
+| 6 | **Run 3 — the acceptance test for v0.1.4** | **next**, and it must be pushed + `claude plugin update`d + a session restart FIRST |
+| 7 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
 The order held up, and the pattern is now four for four: **every bug in this project has been
 found by executing something.** Run 2 adds four more that no amount of reading found — including
@@ -176,7 +194,14 @@ unknown type, so `[R-LOOP-08]` turns it into a critical defect rather than a fal
   settled*. `[R-BUILD-04a]`, `[R-REP-03]`, the tester's base assertions, `DOC_ROUNDS = 2` and the
   parallel lanes all executed against real agents. The lanes brought SD-04 with them.
 
-  **Installed engine = local engine, verified 2026-08-23.** `installed_plugins.json` records
+  **v0.1.4** (2026-08-23) fixes SD-04, SD-05 and SD-07: worktrees outside the repo
+  (`[R-BUILD-07a]`), one `spawn()` wrapper that retries a no-answer free before charging a round
+  (`[R-LOOP-11]`), and `issues/` as the queue's single source of truth (`[R-ARCH-03]`, `AR-QUEUE`).
+  `node verify.mjs` passes **289 checks**, including 21 new ones across three probes. **None of it
+  has run against real agents.**
+
+  **STALE AS OF v0.1.4 — installed is 0.1.3, local is 0.1.4.** Push, update, restart before run 3.
+  The v0.1.3 parity note, for method: `installed_plugins.json` records
   `version: "0.1.3"` at `gitCommitSha: a0dc296`. Repo HEAD is now `8f85245` — **one docs-only
   commit ahead**, touching `HANDOFF.md` and nothing else, so a recursive diff of the repo against
   the install cache reports exactly two differences: this file, and the harness's own `.in_use`

@@ -142,13 +142,26 @@ sdlc2 shares **nothing** at runtime with any other harness.
   behind the slowest node in the graph. An arbiter that returns nothing is a
   `hard-fail`, never a silent soft-pass.
 - `[R-LOOP-08]` **MUST**: a null or failed return — from a maker, a checker or an arbiter —
-  consumes a round and adds a synthetic `critical` defect; nothing retries for free, and **no
-  silence is ever scored as approval**. In particular a round in which a scoring checker failed to
+  consumes a round and adds a synthetic `critical` defect once `[R-LOOP-11]`'s free retry is spent,
+  and **no silence is ever scored as approval**. In particular a round in which a scoring checker failed to
   report scores **0**, never the vacuous `1`. A defect raised against the *harness* (an agent that
   did not answer) blocks the round like any other critical defect but is kept **out of the repair
   brief**: no maker is ever asked to fix a checker. The round is still spent, and the maker is told
   the round could not be scored rather than being handed a fresh "first attempt".
 - `[R-LOOP-09]` **MUST**: every round logs `(round, score, defects, critical/high)` via `log()`.
+- `[R-LOOP-11]` **MUST**: every spawn goes through one wrapper, and a spawn that **never answered**
+  is retried once, free, before any round is charged. An agent that did not answer has not made a
+  mistake worth a defect record: `agent()` returns `null` when a subagent dies on a terminal API
+  error after the harness's own retries, and may throw outright — neither is content. A maker that
+  *does* answer and answers badly (`ok: false`, or a declared artifact missing) is untouched by
+  this: that is content, it is what the checkers exist for, and it still costs a round.
+  When the retry also fails, the round **MUST** be recorded as `errored`, distinct from
+  `rejected`, so a score history reads as what happened rather than as a maker that collapsed, and
+  the defect **MUST** be a *harness* defect under `[R-LOOP-08]` so no maker is handed
+  "you returned nothing" as work to repair. Run 2 is why: one dropped connection
+  (`Connection lost mid-response`) cost the `ux` node its clean pass at 0.79 against a 0.80 bar —
+  one repair round from passing, and that round went to the network. A node's reported score must
+  not be partly a measure of network luck.
 - `[R-LOOP-10]` **MUST**: the engine checks the maker's declared `artifacts` against the node's
   declared `outputs`, and rejects a changelog over 20 lines. It cannot read the disk; it can hold
   the maker to what it claims.
@@ -192,7 +205,18 @@ slice). `[R-PO-02]` **MUST**: issue acceptance criteria are Gherkin **copied ver
 
 **`architect`** — `[R-ARCH-01]` **MUST** produce `design.md` naming the outer seam **per slice**,
 plus ADRs under `docs/adr/`. `[R-ARCH-02]` **MUST NOT** modify `feature.md`, `mockup.html` or any
-issue's acceptance criteria.
+issue's acceptance criteria. `[R-ARCH-03]` **MUST NOT** assert a slice dependency that `issues/`
+does not already declare: the `Blocked by:` lines in `issues/` are the **single source of truth**
+for the queue, and they are what `baseFor()` actually reads. A disagreement with the queue is a
+**defect raised against the `po` node** — in `disputed`, and as a VH record naming the issue file
+to amend — never an edge declared downstream in `design.md` or an ADR. Enforced by the `AR-QUEUE`
+criterion, because the engine cannot read the disk and a checker can. Run 2 is why: the architect
+judged slice 04 to need slice 02 and wrote that into `design.md`/ADR-0025 while the issue said
+`Not blocked by 02`. The engine ignored it and the run's diamond survived — but two artifacts of
+one run asserted different graphs, only one of them executable, and had the engine consulted
+`design.md` the diamond would have collapsed into a chain, silently reproducing `[R-BUILD-04a]`'s
+original defect through a different door. A human was also being asked, in `VH-03`, to confirm an
+edge the build had already ignored on a slice that had already shipped.
 
 **`ux`** — `[R-UX-01]` **MUST** extend `mockup.html` **in place**; a new file is a violation.
 `[R-UX-02]` **MUST** label each state variant with the story/AC it serves. `[R-UX-03]` **MUST**
@@ -221,8 +245,16 @@ the debt — each accepted item naming `file:line` and the violated principle in
 `slice/<feature>/<NN>-<slug>` each. Levels are computed to a fixpoint from `Blocked by:`, never
 assumed from the order the slices arrive in. Slices within a level are independent of one another
 and **MAY** build concurrently, in lanes, each in its **own git worktree** under
-`.sdlc2/worktrees/<feature>/<id>` — never under the feature directory, which the report node
-commits.
+`../.sdlc2-worktrees/<feature>-<runId>/<id>` — **outside the repository**, as a sibling of it.
+`[R-BUILD-07a]` **MUST**: that location is outside the repo, not merely outside the feature
+directory. Two earlier locations were wrong for two different reasons. Under the feature directory
+the report node sweeps a worktree into the paperwork commit. Anywhere *inside* the repo, a
+worktree is invisible to git once ignored and still perfectly visible to the project's **test
+runner** — a full second checkout with its own dependencies, under the project root. Run 2
+measured it: the declared test command collected three sibling worktrees and rendered every
+component against a second copy of React, 16 files and 98 failures, every one of them noise
+landing on the only executable oracle sdlc2 has. The container is stamped with the `runId` so a
+tree stranded by an aborted run cannot collide with a live one.
 
 Lanes open **only** when the project declares `commands.install`. A fresh worktree is a fresh
 tree: it has no installed dependencies, so the test command cannot run in it, and a slice would
@@ -232,8 +264,12 @@ silently. Worktrees **MUST** be released when building ends — left behind they
 clean-tree pre-check, and the branch each one holds cannot be checked out anywhere else. Releasing
 a worktree **MUST NOT** delete its branch: the branches are the deliverable.
 
-The target repo **MUST** ignore `.sdlc2/worktrees/`, and any agent-worktree path its harness uses.
-This is a **target-repo** obligation, not a harness one — see `SETUP.md`.
+The target repo **MUST** ignore any agent-worktree path *its harness* uses (commonly
+`.claude/worktrees/`). This is a **target-repo** obligation, not a harness one — see `SETUP.md`.
+sdlc2's own slice worktrees no longer impose either obligation: being outside the repo they need
+no ignore rule and no test-runner exclusion. Releasing them **MUST** remove the now-empty
+container with `rmdir`, never a recursive delete, and never its parent — the parent is the user's
+directory, not sdlc2's.
 
 An independent slice is cut from the default branch. A slice with `Blocked by:` is cut from its **blocker's branch** instead, because it needs
 the blocker's *code*, not just its issue file — and the code reviewer diffs against that same base,
@@ -325,6 +361,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-LOOP-07 | `runLoop` → `arbitrate()` | the loop returns `needs-arbitration` and calls no arbiter; `arbitrate` runs exactly one, returns `soft-pass`, and hard-fails on silence | ✅ |
 | R-LOOP-08 | `runLoop`, `buildSlices`, `auditMaker` | probes kill the checker, the maker and the developer in turn and assert no green | ✅ |
 | R-LOOP-09 | `log()` calls | read the loop | 👁 |
+| R-LOOP-11 | `spawn()` | probes assert one free retry, that a recovered spawn costs no round, and that an unanswered maker is recorded `errored` and kept out of the repair brief | ✅ |
 | R-LOOP-10 | `auditMaker()` | a missing artifact and a 30-line changelog each produce a defect | ✅ |
 | R-CTX-02 | `pathList()`, prompts | no artifact body inlined; each path listed once | ✅ |
 | R-CTX-05 | `makerPrompt`/`checkerPrompt`/`arbiterPrompt` | pure: same inputs, same output; arity bounded; no transcript | ✅ |
@@ -333,6 +370,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-PO-01/04 | `NODES.po.outputs`, `MAKER_PO` | three outputs declared; `hasUiStories` required | ✅ |
 | R-PO-02/03 | `agents/sdlc2-product-owner.md` | read the persona's node section | 👁 |
 | R-ARCH-01/02, R-UX-01/02 | node mandates + personas | read them | 👁 |
+| R-ARCH-03 | `architect` mandate + `AR-QUEUE` | probes assert the mandate forbids the edge, names issues/ as the source of truth, and that the rubric carries a criterion scoring it | ✅ |
 | R-UX-03 | `agents/sdlc2-ux-auditor.md`, `sdlc2-ux-design.md` | neither grants a browser tool | ✅ |
 | R-BUILD-01 | `buildSlices()` | probes: a red suite consults no arbiter and ships nothing; a stale green from an earlier attempt ships nothing | ✅ |
 | R-BUILD-02 | `escalationPrompt()`, `buildSlices` | `no-commit` / `tester-red` / `tester-silent` / `unjudgeable` are distinguished in the note and the row | ✅ |

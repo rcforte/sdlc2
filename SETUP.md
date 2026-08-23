@@ -106,22 +106,51 @@ gate anything.
 **The rule that follows from this table: whatever `commands.test` does not run, sdlc2 does not
 verify.** There is no second gate.
 
-### Two lines your `.gitignore` must have
+### One line your `.gitignore` must have
 
 ```gitignore
-.sdlc2/worktrees/
 .claude/worktrees/
 ```
 
-Git worktrees are created **inside** the repository. sdlc2 puts a concurrently-built slice's tree
-under `.sdlc2/worktrees/`, and the Claude Code harness puts its own agent worktrees under
-`.claude/worktrees/`. Either one, un-ignored, shows up in `git status --porcelain` — which is
-exactly the check sdlc2's own pre-check 1 requires to be **empty**. Left out, the symptom is a run
-that refuses to start with a dirty tree it did not obviously dirty, or worse, a worktree swept into
-a slice commit.
+The Claude Code harness puts its own agent worktrees **inside** the repository, under
+`.claude/worktrees/`. Un-ignored, that shows up in `git status --porcelain` — exactly the check
+sdlc2's own pre-check 1 requires to be **empty**. Left out, the symptom is a run that refuses to
+start with a dirty tree it did not obviously dirty, or worse, a worktree swept into a slice commit.
 
-This is measured behaviour, not a precaution: launching one isolated agent in a repo without these
-lines takes `git status --porcelain` from empty to `?? .claude/`.
+This is measured behaviour, not a precaution: launching one isolated agent in a repo without that
+line takes `git status --porcelain` from empty to `?? .claude/`.
+
+**sdlc2's own slice worktrees are no longer your problem.** As of 0.1.4 they are created *outside*
+the repository, as a sibling directory (`../.sdlc2-worktrees/<feature>-<runId>/<slice>`), and are
+removed when the build ends. You do not need to ignore them, and — the reason this changed — your
+**test runner** does not need to be taught to skip them either. See the next section.
+
+### Why they moved out, and what to check if you host them yourself
+
+Ignoring a worktree in git is only half the decision. A worktree inside the repo is invisible to
+`git status` and still perfectly visible to your **test runner**: it is a full second checkout,
+with its own `node_modules`, sitting under your project root. Run 2 measured the consequence in the
+lab — the declared `npm test -- --run` collected three sibling worktrees' suites from the main
+checkout and rendered every component against a second copy of React:
+
+```
+without the exclusion:  16 test files, 98 failures — all "Cannot read properties of null (reading 'useState')"
+with it:                 4 test files, 56 passing
+```
+
+Every one of those failures is noise, and it lands on the *tester*, which is sdlc2's only
+executable oracle. A slice fails for a reason that has nothing to do with its code.
+
+Putting the worktrees outside the repository removes the whole class. If you ever relocate them
+back inside — or if your harness puts *its* worktrees there — your runner needs the matching
+exclusion:
+
+| runner | setting |
+|---|---|
+| Vitest | `test.exclude: [...configDefaults.exclude, '.claude/worktrees/**']` |
+| Jest | `testPathIgnorePatterns` |
+| pytest | `norecursedirs` |
+| Maven / Gradle | unaffected — they resolve modules, not globs |
 
 Also make sure whatever `commands.install` produces is ignored — `node_modules/`, `target/`,
 `.venv/`. Each lane installs into its own worktree, so an un-ignored dependency directory becomes

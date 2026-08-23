@@ -90,6 +90,16 @@ your reply** — the engine passes paths between nodes, not contents.
 }
 ```
 
+- **The slice dependency queue is not yours to declare.** The `Blocked by:` lines in the issue
+  files are the single source of truth for it, and they are the only thing the build engine reads
+  when it decides which branch a slice is cut from. `design.md` and your ADRs **must not** assert a
+  dependency edge the issues do not already carry — not even one you are right about. If a slice
+  genuinely needs a blocker its issue does not declare, that is a **defect against the
+  product-owner node**: put it in `disputed` and write a `VERIFY-WITH-HUMAN.md` record naming the
+  issue file to amend. Declaring it downstream instead leaves two artifacts of the same run
+  asserting different graphs, with only one of them executable — and the human you asked to
+  confirm it is being asked about an edge the build already ignored, on a slice that already
+  shipped.
 - On a repair round you receive the checker's defects. Fix **every** one; do not regress what
   already passed. If you genuinely disagree, still address the underlying concern and record your
   reasoning in `disputed`.
