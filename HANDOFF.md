@@ -8,65 +8,50 @@
 
 ## Do this first
 
-**Run 4. Everything it needs is already in place** (state saved 2026-08-23, before a session
-restart):
+**Install 0.1.7 and restart, then run 5.** Run 4 is done and merged; the reason a restart is
+needed again is a new finding, **SD-09**, filed in the lab's `docs/harness-findings.md`.
 
 | gate | state |
 |---|---|
-| plugin repo | `main` = `origin/main` = **`09839cf`**, tagged **`v0.1.6`**, tag pushed |
-| installed plugin | **0.1.6** at `gitCommitSha: 09839cf`; install cache is byte-identical to the repo, not even an `.in_use` marker |
-| lab repo | `main` = `origin/main` = **`6e5d623`**, clean, suite green (**84 tests, 4 files**) |
-| lab config | `stack:` and `lanes: 4` declared in the lab's `CLAUDE.md` sdlc2 block |
-| checks | `node verify.mjs` → **366**, was 311 |
-| restart | **the only thing left.** A session pins its plugin root at start (SD-03), so the session that ran the update is still on 0.1.4 |
+| plugin repo | `main` = `origin/main` = the **`v0.1.7`** tag, pushed |
+| installed plugin | **still 0.1.6 at `09839cf`** — `claude plugin update` has not been run |
+| lab repo | `main` = `origin/main`, clean, run 4 merged, suite green |
+| checks | `node verify.mjs` → **371**, was 366 |
+| restart | **required**, and a session pins its plugin root at start (SD-03) |
 
-**First thing to check when run 4 starts: the first line must read `Engine: sdlc2 0.1.6`.** Note
-0.1.5 was never cached — the update went 0.1.4 → 0.1.6 directly — so run 4 is the first execution
-of BOTH releases. Pre-check 0 should refuse to start from the 0.1.4 directory that is still sitting
-in the cache, and that refusal has never fired against a real run, so verify it rather than trust it.
+**SD-09 — two engines can both call themselves 0.1.6, and pre-check 0 cannot tell.** Run 4's own
+fix (`[R-REP-06]`, `9966578`) was pushed with `VERSION` left at `0.1.6`, so the repo and the
+install cache were both "0.1.6" and three engine files apart. Pre-check 0 compares directory
+*names* against version-numbered siblings — both are literally `0.1.6`, nothing newer exists, so
+it passes and the run proceeds on the older engine. SD-03 catches *older directory, newer one
+installed*; this is *same name, different contents*, which no name comparison can catch. Unblocked
+by shipping `[R-REP-06]` as **0.1.7**; **the finding stays open** — the guard worth building is a
+`verify.mjs` probe that fails when tracked engine files differ from the tag named by `VERSION`.
 
-**Seed: pick one whose slices are of visibly uneven length.** The biggest fix in 0.1.6 is the
-removal of the level barrier (E2-14), and a barrier only costs you when siblings finish at
-different times. Equal-length slices would hide both success and failure.
+**Run 4 is DONE** — `nf-20260823T2033Z`, feature `saved-at`, 4 slices, all merged to lab `main`.
+Report header reads `Engine: sdlc2 0.1.6`, so **SD-03 holds for the second time**. `git worktree
+list` ended with only the main checkout, so **SD-04 holds again**. It was the first execution of
+both 0.1.5 and 0.1.6 — five releases' worth of unrun fixes finally ran.
 
-**Step 6b is done: v0.1.6 implements all sixteen `sdlc2-enhance-2.md` items** (2026-08-23), except
-**E2-01**, which needs a packaging decision no code change can make. **None of it has run against
-real agents** — five releases in a row now.
+**What run 4 found: the fan-out row.** The report printed `build | pass | — | 0` beside three
+scored nodes, which reads as a node nobody measured; build had been measured once per slice and
+the row threw all four away. Fixed by `[R-REP-06]`: the row now carries unit counts, review-score
+spread and worst-attempts-against-cap. Shipped as **0.1.7**, **not yet run**.
 
-Six of the sixteen change PROMPTS rather than engine logic (**E2-02** the declared stack, **E2-11**
-the plan printout, **E2-12** surfaced disputes, **E2-13** the read-only contract, **E2-15** carry
-the seed forward, **E2-16** the reviewer's exclusion list). A probe cannot judge a prompt, so those
-six are exactly what run 4 has to look at.
+**What run 5 must still look at.** Every item below outlived run 4 and is unchanged:
 
-Two of them change how a run BEHAVES and should be watched directly:
+- **The six prompt-only items of `sdlc2-enhance-2.md`** (E2-02 declared stack, E2-11 the plan
+  printout, E2-12 surfaced disputes, E2-13 the read-only contract, E2-15 carry the seed forward,
+  E2-16 the reviewer's exclusion list). A probe cannot judge a prompt.
+- **E2-14, the removed level barrier.** `saved-at` cut 4 slices; check the run log for a slice
+  starting while an unrelated sibling was still building.
+- **The veto round and the plateau exit** — still no data after four runs. Per the note below,
+  stop waiting for a run to settle these and build them as probes.
+- **`hasUiStories`** — still unenforced, four runs later.
+- **SD-05**, the free transport retry — still never fired. Close it as proven-by-probe (P18b).
 
-- **E2-14** — slices are scheduled against their own blockers now, with no level barrier. Run 3 lost
-  34 of 141 minutes to that barrier. Run 4 should show a slice starting the moment its blocker
-  lands, while an unrelated sibling is still building.
-- **E2-03** — the plateau exit is gone and a rejected maker output is re-made once free. A document
-  node that has a round thrown out should still get its two scored rounds.
-
-**Three behaviour changes that will make run 4 LOOK different. None is a regression:**
-
-1. **Every slice gets its own worktree when lanes are on.** Continuous scheduling cannot know at
-   start time whether a slice will end up sharing the clock, so a worktree is the only safe choice
-   — and each one pays `npm ci`. Run 3 had three slices that ran alone and paid nothing. Weigh that
-   new cost against the 34 minutes the barrier was wasting.
-2. **Run 3's slice 06 would now escalate instead of shipping.** The developer can no longer edit the
-   issue file (E2-13), so narrowing a scenario at attempt 4 is not available. It reports an
-   `amendment` and escalates. Paired with E2-12, the architect's queue objection is printed BEFORE
-   the build starts, so the queue can be fixed while it is still free. Expect escalations where run
-   3 shipped, unless you act on the printed dispute.
-3. **The document phase may run shorter** (E2-15). If SCORES drop rather than time, that instruction
-   is too strong and should come back out.
-
-**Two items should stop waiting for a run — no run will ever settle them:**
-
-- **SD-05**, the free transport retry: three runs, 43 agents, zero errors. It can only be proven by
-  fault injection, which `verify.mjs` probe P18b already does. Close it as proven-by-probe.
-- **The veto round**: needs a checker to score above the bar while withholding a pass. Not
-  orderable from a seed. Build it as a probe or drop it from the pending list.
-
+**Seed for run 5: pick one whose slices are of visibly uneven length** — the barrier only costs
+you when siblings finish at different times, so equal slices hide both success and failure.
 
 **Step 6: run 3 is DONE** — `nf-20260823T1333Z`, feature `remembered-names`, 2h 21m, 43 agents,
 3.0M subagent tokens, 0 agent errors. Seven slices shipped, none escalated, no soft-passes, four
@@ -238,6 +223,9 @@ Also confirmed working, per the lab's findings file:
 | 6 | **Run 3 — the acceptance test for v0.1.4** | **done** — `nf-20260823T1333Z` (`remembered-names`), 7 slices, 0 escalated, 0 soft-passes, 4 VH rows open. SD-03/04/07 confirmed against real agents; **SD-05 never fired** (43 agents, 0 errors) and stays unproven. Found SD-08 |
 | 6a | **v0.1.5 — SD-08, the report never said whether lanes fired** | **done** — `[R-REP-05]`, 311 checks green (was 304). Not yet run against real agents |
 | 6b | **Round 2 of enhancements** — `sdlc2-enhance-2.md` | **written 2026-08-23, none implemented.** Ten items: four engine defects found by reading v0.1.4 against its own claims, the two packaging/independence items, and four judgement calls. To be worked AFTER run 3 |
+| 6c | **v0.1.6 — the `sdlc2-enhance-2` batch** | **done** — sixteen items, all but E2-01. 366 checks green (was 311) |
+| 6d | **Run 4 — the acceptance test for 0.1.5 AND 0.1.6** | **done** — `nf-20260823T2033Z` (`saved-at`), 4 slices, all merged. SD-03 and SD-04 hold again. Found the fan-out row |
+| 6e | **v0.1.7 — `[R-REP-06]`, the fan-out row; SD-09 filed** | **done** — 371 checks green (was 366). Not yet run against real agents |
 | 7 | The real project (TypeScript + Spring Boot + Maven) | not started — `SETUP.md` covers it |
 
 The order held up, and the pattern is now four for four: **every bug in this project has been
