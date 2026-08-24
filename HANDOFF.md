@@ -8,17 +8,17 @@
 
 ## Do this first
 
-**Install 0.1.8 and restart, then run 5.** Run 4 is done, merged, and its human-verify pass is
-closed out. 0.1.7 was tagged but never installed, so **0.1.7 and 0.1.8 collapse into one update
-and one restart** — do not install them separately.
+**Restart, then run 5.** Run 4 is done, merged, and its human-verify pass is closed out. 0.1.8 is
+**installed** (0.1.7 and 0.1.8 collapsed into one update, as intended — 0.1.7 was never cached).
+The restart is the only thing left.
 
 | gate | state |
 |---|---|
 | plugin repo | `main` = `origin/main` = the **`v0.1.8`** tag, pushed |
-| installed plugin | **still 0.1.6 at `09839cf`** — `claude plugin update` has not been run |
+| installed plugin | **0.1.8 at `1f02a9c`**, same sha as repo HEAD and the `v0.1.8` tag; the install cache is byte-identical to the repo bar the harness's own `.in_use` marker |
 | lab repo | `main` = `origin/main`, clean, run 4 merged, VH pass closed, suite green (125 tests, 5 files) |
 | checks | `node verify.mjs` → **372**, was 366 |
-| restart | **required**, and a session pins its plugin root at start (SD-03) |
+| restart | **the only thing left** — a session pins its plugin root at start (SD-03), and the session that ran the update is still on 0.1.6 |
 
 **SD-09 — two engines can both call themselves 0.1.6, and pre-check 0 cannot tell.** Run 4's own
 fix (`[R-REP-06]`, `9966578`) was pushed with `VERSION` left at `0.1.6`, so the repo and the
@@ -54,6 +54,12 @@ spread and worst-attempts-against-cap. Shipped as **0.1.7**, **not yet run**.
   stop waiting for a run to settle these and build them as probes.
 - **`hasUiStories`** — still unenforced, four runs later.
 - **SD-05**, the free transport retry — still never fired. Close it as proven-by-probe (P18b).
+
+**SD-03's refusal fired for real, for the first time.** The handoff for run 4 said pre-check 0's
+stale-root refusal "has never fired against a real run, so verify it rather than trust it".
+Executed against the live cache from a 0.1.6-pinned session it prints
+`STALE: running 0.1.6, but 0.1.8 is installed`. That is a true positive against real state, not a
+stub — and it is exactly why the restart below is not optional.
 
 **Seed for run 5: pick one whose slices are of visibly uneven length** — the barrier only costs
 you when siblings finish at different times, so equal slices hide both success and failure.
