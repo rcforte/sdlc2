@@ -8,17 +8,37 @@
 
 ## Do this first
 
-**Restart, then run 5.** Run 4 is done, merged, and its human-verify pass is closed out. 0.1.8 is
-**installed** (0.1.7 and 0.1.8 collapsed into one update, as intended — 0.1.7 was never cached).
-The restart is the only thing left.
+**Run 5 is RUNNING on 0.1.8** — feature `undo-a-removal`, seed grilled in the lab session, chosen
+for slices of visibly uneven length so the removed level barrier (E2-14) has something to show.
+The restart landed and the run is in flight. **Read its report when it returns**, then do the
+human-verify pass and the merges; sdlc2 never merges.
+
+**Do not push, tag, or `claude plugin update` until run 5 finishes.** A running session reads the
+install cache, so writing to the cache mid-run swaps the engine underneath it. Editing this repo is
+free — the run cannot see it.
 
 | gate | state |
 |---|---|
-| plugin repo | `main` = `origin/main` = the **`v0.1.8`** tag, pushed |
-| installed plugin | **0.1.8 at `1f02a9c`**, same sha as repo HEAD and the `v0.1.8` tag; the install cache is byte-identical to the repo bar the harness's own `.in_use` marker |
-| lab repo | `main` = `origin/main`, clean, run 4 merged, VH pass closed, suite green (125 tests, 5 files) |
-| checks | `node verify.mjs` → **372**, was 366 |
-| restart | **the only thing left** — a session pins its plugin root at start (SD-03), and the session that ran the update is still on 0.1.6 |
+| run 5 | **in flight** on 0.1.8 — do not touch the install cache |
+| plugin repo | **0.1.9 in preparation**: `R-REP-07` committed at `b40c8e1`, deliberately **untagged and unpushed** until run 5 lands |
+| installed plugin | **0.1.8 at `1f02a9c`** — the engine run 5 is executing |
+| lab repo | run 5 is writing to it; hands off until it returns |
+| checks | `node verify.mjs` → **383**, was 372 |
+
+**0.1.9 so far: `[R-REP-07]`, the veto round.** A round that scored at or above its bar and was
+stopped by an open defect anyway now says so — in the log as it happens, and as a tally the report
+prints even when it reads zero. This is the item the handoff kept listing as "no data after four
+runs": the veto was never silent, it was unrecorded, and a score plus a round count cannot tell a
+round stopped by severity from one that simply scored badly. Zero and unmeasured call for opposite
+decisions about whether the veto is worth its rubber-stamping risk, and until now the report could
+not distinguish them. Proven by P17b/P17c against both mutants — dropping the flag fails four
+checks, and a flag that ignores the score fails the negative case. **Not yet run**, which is the
+seventh release in a row to be able to say that.
+
+**Still open for 0.1.9, and neither needs a run:** the second half of SD-09 (stamp the commit sha
+into the plugin at release, so a report names its *build* and not just its version), and closing
+**SD-05** as proven-by-probe (P18b) in the lab's `docs/harness-findings.md` — that edit is blocked
+only by run 5 owning the lab repo right now.
 
 **SD-09 — two engines can both call themselves 0.1.6, and pre-check 0 cannot tell.** Run 4's own
 fix (`[R-REP-06]`, `9966578`) was pushed with `VERSION` left at `0.1.6`, so the repo and the
