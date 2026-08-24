@@ -928,6 +928,94 @@ await probe('E-10 severity anchoring and veto scope', async () => {
   check(r.verdict === 'pass' && r.rounds === 1, `a clean score with one high defect passes in round 1 (got '${r.verdict}' in ${r.rounds})  [E-10]`)
 })
 
+// P17b — [R-REP-07] A veto round NAMES ITSELF. P17 covers what may veto; this covers whether
+// anyone can tell afterwards that it did. SPEC §12 has asked since v0.1.2 whether the severity
+// veto ever binds on its own, and four runs answered nothing — not because it never bound, but
+// because a score and a round count cannot separate a round stopped by severity from one that
+// simply scored badly. The flag is only worth anything if it tells those two apart, so both cases
+// are asserted here; the positive alone would be satisfied by a flag that just means "not a pass".
+await probe('R-REP-07 a veto round names itself', async () => {
+  const logs = []
+  const critical = { criterion: 'PO-AC', severity: 'critical', location: 'x', evidence: 'quoted', fix: 'f' }
+  const docMaker = { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
+
+  // A doc node scoring a PERFECT 1.0 with one critical open: it clears the bar and is stopped anyway.
+  const E = engine({
+    parallel: parallelReal,
+    log: (m) => logs.push(m),
+    agent: async (p, o) => {
+      if (isMake(o)) return docMaker
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [critical] }
+    },
+  })
+  const r = await E.runLoop(E.NODES.po)
+  const bar = E.RUBRICS.po.threshold
+  const scored = r.history.filter((h) => typeof h.score === 'number')
+  check(r.verdict !== 'pass', `a perfect score with one critical open does not pass (got '${r.verdict}')  [R-LOOP-01]`)
+  check(scored.length > 0 && scored.every((h) => h.score >= bar), 'and every scored round DID clear the bar  [R-REP-07]')
+  check(scored.every((h) => h.veto === true), 'so each is recorded as a veto round  [R-REP-07]')
+  check(logs.some((m) => /VETO ROUND/.test(m)), 'and the run says so at the moment it happens  [R-REP-07]')
+
+  // The negative. Same failure to pass, different cause: the score never reached the bar, so this
+  // is an ordinary fail and must NOT inflate the veto count.
+  const E2 = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      if (isMake(o)) return docMaker
+      if (isArb(o)) return { finalized: true, records: [] }
+      return { pass: true, criteria: E2.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 0 })), defects: [critical] }
+    },
+  })
+  const r2 = await E2.runLoop(E2.NODES.po)
+  const scored2 = r2.history.filter((h) => typeof h.score === 'number')
+  check(scored2.length > 0 && scored2.every((h) => h.veto === false), 'a round that failed on SCORE is not a veto round  [R-REP-07]')
+})
+
+// P17c — [R-REP-07] the count reaches the report, and zero survives to the page. A tally the
+// report agent has to derive for itself is a tally that goes missing on the run where it reads
+// zero — and zero is the answer that would retire the veto, so it is the one that must not vanish.
+await probe('R-REP-07 the veto tally reaches the report', async () => {
+  const critical = { criterion: 'PO-AC', severity: 'critical', location: 'x', evidence: 'quoted', fix: 'f' }
+  const run = async (defectsInRound1) => {
+    let reportPrompt = ''
+    let poRound = 0
+    const E = engine({
+      parallel: parallelReal,
+      args: ARGS,
+      agent: async (p, o) => {
+        const L = o.label || ''
+        if (L === 'report') { reportPrompt = p; return {} }
+        if (isMake(o) && L.startsWith('po')) { poRound++; return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false } }
+        if (L.startsWith('po:')) return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 1 })), defects: poRound === 1 && defectsInRound1 ? [critical] : [] }
+        return {}
+      },
+    })
+    await E.walk()
+    return reportPrompt
+  }
+
+  // po is vetoed in round 1 and clean in round 2, so the node passes AND a veto round exists.
+  const withVeto = await run(true)
+  const m = /Vetoes: (\{.*?\})\n/.exec(withVeto)
+  check(!!m, 'the report is handed a Vetoes object  [R-REP-07]')
+  if (m) {
+    const v = JSON.parse(m[1])
+    check(v.loop === 1, `one veto round is counted (got ${v.loop})  [R-REP-07]`)
+    check(v.loopScoredRounds >= 2, `against the scored rounds it happened in (got ${v.loopScoredRounds})  [R-REP-07]`)
+    check(v.where.indexOf('po') >= 0, 'and the node it happened at is named  [R-REP-07]')
+  }
+
+  // The same run with nothing vetoed still ships the tally — reading zero, not absent.
+  const clean = await run(false)
+  const m2 = /Vetoes: (\{.*?\})\n/.exec(clean)
+  check(!!m2 && JSON.parse(m2[1]).loop === 0, 'a run with no veto still reports the tally, as zero  [R-REP-07]')
+
+  // And the report is told never to drop the line, because an omitted zero reads as unmeasured.
+  const src = R('new-feature.workflow.js')
+  check(/NEVER omitted/.test(src) && /zero is the finding/.test(src), 'the report node is told to print it even at zero  [R-REP-07]')
+})
+
 // P22 — [E2-06] The po cannot declare "no UI stories" while queueing UI slices, and a slice
 // marked ui:true never builds against a ux node that was gated off.
 await probe('E2-06 hasUiStories is enforced', async () => {

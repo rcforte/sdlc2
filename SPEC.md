@@ -363,6 +363,15 @@ checking anything out.
   is followed by a line naming the slice table as where the per-unit detail lives. Found in the
   `saved-at` run, where `build | pass | — | 0` sat beside three scored nodes and read as missing
   data.
+- `[R-REP-07]` **MUST**: the report states how many rounds were **veto rounds** — rounds that
+  scored at or above their bar and were stopped by an open defect anyway — and states it **even
+  when the count is zero**. A veto round is the only case where severity decides an outcome on its
+  own, and severity is the one judgement here with no anchors (`[E-10]` narrowed what it may veto
+  on for exactly that reason). §12 asked whether the veto ever binds by itself and four runs
+  answered nothing, because a score and a round count cannot separate a round stopped by severity
+  from one that simply scored badly. Zero is a real answer and must reach the page: an omitted line
+  reads as unmeasured, and unmeasured and zero call for opposite decisions about keeping the veto.
+
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
   it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
   rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
@@ -435,6 +444,7 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-REP-04 | `VERSION_RAN`, `walk()`, the report prompt | a probe asserts the version reaches the report prompt, that an unstamped run says `unknown` rather than guessing, and that the run's first log line names the engine | ✅ |
 | R-REP-05 | the lane scheduler, the report prompt | the scheduler records `lanes` (batches, widest, install) and the build node carries it; the report prompt is handed it and told to state it either way | ✅ |
 | R-REP-06 | `writeReport()`'s node rows, the report prompt | probes assert a fan-out row carries `fanout` with its unit counts, review spread and attempts-against-cap, and that the prompt forbids the bare `—`/`0` cells | ✅ |
+| R-REP-07 | `runLoop`'s history rows, the slice loop, `writeReport()`'s tally | probes assert a round at or above bar with a critical open is flagged `veto` while a round that failed on SCORE is not, and that the tally reaches the report prompt — reading zero rather than going absent when nothing vetoed | ✅ |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 
@@ -512,11 +522,18 @@ It cannot prove the graph produces good software — the first real run is that 
    default-to-FAIL tie-break on scoring checkers, and two mechanical faults that made rounds carry
    no signal (`[E-02]`, `[E-05]`).
 
-   **Still unmeasured, and the thing to read run 2 for:** whether the veto ever binds *on its own*.
-   Run 1 predates the per-round history, so rounds 1–4 are invisible; in the three rounds we can
-   see, the **score** term is what failed. The history is now recorded per round, so any round with
-   `score ≥ bar` and no pass is a veto round. If those turn out to be common, the severity
-   anchoring in `[R-LOOP-01]` is the lever; if they are absent, the bar was the whole story.
+   **Whether the veto ever binds *on its own* — asked since v0.1.2, and now actually counted.**
+   Run 1 predates the per-round history, so its rounds 1–4 are invisible; in the three rounds we
+   can see, the **score** term is what failed. Four runs added nothing to that, and the reason was
+   never that the veto stayed quiet — it was that nobody could tell. A score and a round count
+   cannot separate a round stopped by severity from one that simply scored badly, so four runs of
+   silence were read as "no data" when they may have been four runs of zero, and those two call for
+   opposite decisions. `[R-REP-07]` counts them: a round at or above bar with an open defect is
+   flagged as it happens, and the report carries the tally whether it reads zero or not. If veto
+   rounds turn out to be common, the severity anchoring in `[R-LOOP-01]` is the lever; if the tally
+   reads zero across a run, the bar was the whole story. **Still unmeasured until a run reports
+   it** — the counter is built and proven against a stub, which is not the same as having the
+   number.
 6. **The run is scoped to the session's cwd, and nothing enforces that it is the repo you meant.**
    There is no `repoRoot` argument: `featureDir` is relative and the developer's git instructions
    are bare `git checkout -b` / `git commit`, so subagents build wherever the session is rooted.

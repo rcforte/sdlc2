@@ -950,12 +950,23 @@ async function runLoop(node) {
     defects = dedupe(found)
     prevScores = scoreBrief(verdicts) // carried into the next round's maker AND checker
     const open = blockingOpen(defects, true) // [E-10] doc nodes veto on `critical` only
-    history.push({ round: round, score: score, defects: defects.length, open: open.length, binaryFailed: binaryFailed })
+    // [R-REP-07] A round whose SCORE cleared the bar and was stopped by an open defect anyway is a
+    // VETO ROUND — the one case where severity decides a node's fate by itself. Severity is the
+    // least-anchored signal a checker emits (scores are anchored per criterion, severity is not),
+    // which is why [E-10] already narrowed what it may veto on. SPEC §12 has called the veto's
+    // real-world weight "still unmeasured" since v0.1.2 and four runs added no data — not because
+    // it never bound, but because nothing wrote it down. A reader sees a score and a round count,
+    // and those cannot tell a veto round from a round that simply scored badly. The datum costs
+    // one boolean; whether the veto earns its rubber-stamping risk cannot be judged until the
+    // count exists.
+    const veto = !binaryFailed && score >= bar && open.length > 0
+    history.push({ round: round, score: score, defects: defects.length, open: open.length, binaryFailed: binaryFailed, veto: veto })
 
     log(
       `${label} round ${round}/${node.rounds}: score ${score} (bar ${bar}), ` +
         `${defects.length} defect(s), ${open.length} critical/high` +
-        (binaryFailed ? ', BINARY CHECKER RED' : '')
+        (binaryFailed ? ', BINARY CHECKER RED' : '') +
+        (veto ? ' — VETO ROUND: the score cleared the bar, an open defect stopped it anyway [R-REP-07]' : '')
     )
 
     if (hard) {
@@ -1407,6 +1418,12 @@ async function buildSlices(node) {
     // that never compiled is never reported as a failing test suite.
     let outcome = 'no-commit'
     let prevScores = '' // [E2-07] last attempt's per-criterion review scores; '' on attempt 1
+    // [R-REP-07] How many of this slice's attempts were VETO attempts — tester green, review score
+    // at or above the bar, and an open critical/high stopped it anyway. `outcome` already calls
+    // that case `craft-debt`, but `craft-debt` also covers a review that simply scored below the
+    // bar, so the two are indistinguishable in the report. Counting them apart is what lets a run
+    // answer whether the severity veto ever binds on its own.
+    let vetoed = 0
 
     while (attempt < rounds) {
       attempt++
@@ -1477,16 +1494,19 @@ async function buildSlices(node) {
       prevScores = scoreBrief([rv]) // [E2-07] carried into the next attempt's developer AND reviewer
       const all = dedupe(testerDefects.concat(cleanDefects(rv, `review:${slice.id}`)).concat(missing))
       const open = blockingOpen(all)
+      const veto = testerPass && reviewScore >= bar && open.length > 0 // [R-REP-07]
+      if (veto) vetoed++
 
       log(
         `${slice.id} attempt ${attempt}/${rounds}: tester ${testerPass ? 'GREEN' : 'RED'}, ` +
           `code-review ${reviewScore} (bar ${bar}), ${open.length} critical/high` +
-          (missing.length ? `, ${missing.length} checker(s) silent` : '')
+          (missing.length ? `, ${missing.length} checker(s) silent` : '') +
+          (veto ? ' — VETO ATTEMPT: green suite, review at bar, an open defect stopped it anyway [R-REP-07]' : '')
       )
 
       if (testerPass && reviewScore >= bar && open.length === 0) {
         shipped.push({ id: slice.id, branch: build.branch, sha: build.sha })
-        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore, base: base })
+        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore, base: base, vetoed: vetoed })
         done[slice.id] = true
         // The CANONICAL name, not the developer's reported one: the tester asserted HEAD is on
         // exactly this branch, so it is the only branch name in this loop backed by evidence.
@@ -1512,7 +1532,7 @@ async function buildSlices(node) {
       // bookkeeping disagrees with itself and that is worth saying out loud, not papering over.
       const reason = outcome === 'craft-debt' ? 'inconsistent-state' : outcome
       escalated.push({ id: slice.id, defects: defects, reason: reason })
-      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: reason, defects: defects, branch: lastGood ? lastGood.branch : null })
+      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: reason, defects: defects, branch: lastGood ? lastGood.branch : null, vetoed: vetoed })
       done[slice.id] = false
       escalations.push({ slice: slice, reason: reason, attempt: attempt, defects: defects })
       log(`✗ ${slice.id} escalated after ${attempt} attempt(s) — ${reason}.`)
@@ -1526,7 +1546,7 @@ async function buildSlices(node) {
     })
     if (!decision) {
       escalated.push({ id: slice.id, defects: defects, reason: 'arbiter-silent' })
-      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: 'arbiter-silent', defects: defects, branch: lastGood.branch })
+      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: 'arbiter-silent', defects: defects, branch: lastGood.branch, vetoed: vetoed })
       done[slice.id] = false
       log(`✗ ${slice.id}: the arbiter returned nothing — not recording a soft-pass nobody decided.`)
       return
@@ -1535,7 +1555,7 @@ async function buildSlices(node) {
     // exact commit the tester verified — the shipped sha and the verified sha are one commit.
     if (decision.finalized === false) {
       escalated.push({ id: slice.id, defects: defects, reason: 'arbiter-rejected' })
-      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: 'arbiter-rejected', defects: defects, branch: lastGood.branch })
+      rows.push({ id: slice.id, attempts: attempt, verdict: 'escalated', reason: 'arbiter-rejected', defects: defects, branch: lastGood.branch, vetoed: vetoed })
       done[slice.id] = false
       escalations.push({ slice: slice, reason: 'arbiter-rejected', attempt: attempt, defects: defects })
       log(`✗ ${slice.id}: the arbiter judged the surviving findings too serious to accept — escalated.`)
@@ -1543,7 +1563,7 @@ async function buildSlices(node) {
     }
     const vh = (decision.records || []).map((r) => r.id).filter(Boolean)
     shipped.push({ id: slice.id, branch: lastGood.branch, sha: lastGood.sha, softPass: true, vh: vh })
-    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh, base: base })
+    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh, base: base, vetoed: vetoed })
     done[slice.id] = true
     branchOf[slice.id] = `slice/${FEATURE}/${slice.id}`
     log(`~ ${slice.id} shipped with accepted debt on ${lastGood.branch} (${vh.length} VH record(s)).`)
@@ -1828,6 +1848,22 @@ async function writeReport(node) {
   for (const id of Object.keys(results)) {
     for (const d of results[id].disputed || []) disputed.push({ node: id, criterion: d.criterion, why: d.why })
   }
+  // [R-REP-07] The veto tally. Computed here rather than left for the report agent to derive,
+  // because a number nobody can recompute from the report is a number the run did not measure —
+  // and this one is the answer to a question SPEC §12 has carried unanswered since v0.1.2. Zero is
+  // a real answer and must survive to the page: four runs of silence were read as "no data" when
+  // they may simply have been four runs of zero, and the two call for opposite decisions about
+  // whether the severity veto is worth keeping.
+  const vetoes = {
+    loop: nodeRows.reduce((t, r) => t + (r.history || []).filter((h) => h.veto === true).length, 0),
+    loopScoredRounds: nodeRows.reduce((t, r) => t + (r.history || []).filter((h) => typeof h.score === 'number').length, 0),
+    build: (build.rows || []).reduce((t, r) => t + (r.vetoed || 0), 0),
+    buildAttempts: (build.rows || []).reduce((t, r) => t + (r.attempts || 0), 0),
+    where: nodeRows
+      .filter((r) => (r.history || []).some((h) => h.veto === true))
+      .map((r) => r.node)
+      .concat((build.rows || []).filter((r) => (r.vetoed || 0) > 0).map((r) => `build:${r.id}`)),
+  }
 
   await spawn(
     `Write the sdlc2 run report to ${REPORT} (create the directory if needed). It is the only file\n` +
@@ -1840,6 +1876,7 @@ async function writeReport(node) {
       `Lanes: ${JSON.stringify(build.lanes)}\n` +
       `Amendments: ${JSON.stringify(build.amendments || [])}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
+      `Vetoes: ${JSON.stringify(vetoes)}\n` +
       `Maker disputes (checker findings the maker addressed but disagreed with): ${JSON.stringify(disputed)}\n\n` +
       `Structure: (0) a header carrying Feature, Run, Base branch, AND \`Engine: sdlc2 <version>\`\n` +
       `with its path — [SD-03] state the engine verbatim as given, even when it reads \`unknown\`.\n` +
@@ -1862,6 +1899,14 @@ async function writeReport(node) {
       `[SD-05] A round carrying \`errored: true\` is NOT a maker that collapsed — it is a spawn that\n` +
       `never answered, already retried once, i.e. infrastructure. Write it as \`errored\`, never as\n` +
       `\`rejected\`, and do not count it against the maker's work or read a trend through it;\n` +
+      `[R-REP-07] Then ONE line from \`Vetoes\`, headed **Veto rounds**, and NEVER omitted — print it\n` +
+      `even when every number is zero, because zero is the finding here and an absent line reads as\n` +
+      `an unmeasured one. A veto round is a round that scored AT OR ABOVE its bar and was stopped by\n` +
+      `an open defect anyway, so it is the only evidence of severity — the one judgement in this\n` +
+      `system with no anchors — deciding an outcome by itself. Write \`loop\` of \`loopScoredRounds\`\n` +
+      `scored rounds and \`build\` of \`buildAttempts\` slice attempts, then name \`where\` if it is not\n` +
+      `empty. State the count and stop: do NOT recommend keeping, widening or dropping the veto —\n` +
+      `one run is not a sample, and that call is the reader's;\n` +
       `(2) a slice table — slice · attempts · verdict · branch@sha · cut from (the \`base\` field) ·\n` +
       `review score · reason. A \`base\` that is another slice's branch means the slice was stacked\n` +
       `on the blocker it declared; say so rather than leaving the reader to infer it;\n` +
