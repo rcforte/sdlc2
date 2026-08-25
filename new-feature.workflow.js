@@ -230,6 +230,13 @@ const RELEASE = {
     released: { type: 'boolean' }, // git worktree list shows the main checkout ALONE
     remaining: { type: 'array', items: { type: 'string' } },
     branches: { type: 'boolean' }, // every slice branch still present
+    // [SD-12] The release prompt has always told the agent to `rmdir` the emptied container, and
+    // there was no field to say whether it did — an instruction nobody could observe. Run 5's
+    // report asserted "the container directory was empty and removed" anyway; the directory is
+    // still there. The report node's own first line reads "use exactly this data — invent
+    // nothing", so a prompt-level prohibition was in force and did not hold. The lesson the fix
+    // encodes: a report can only be trusted on claims a FIELD backs, so make the claim a field.
+    container: { type: 'boolean' }, // the emptied container directory was removed
     notes: { type: 'string' },
   },
 }
@@ -261,6 +268,58 @@ const BUILD = {
     },
     notes: { type: 'string' },
   },
+}
+
+// [SD-11 / R-BUILD-07] A slice's id becomes its git branch name, and only ONE of the two paths
+// that produce ids was ever told what an id looks like. The resolver spawn below is told "the
+// NN-slug from the filename"; the po's own manifest — the fast path [E-13] added to skip that
+// round-trip — is filtered for truthiness and nothing more. `SLICE_ITEM.id` carries the comment
+// `// NN-slug`, and a comment is not a constraint. Run 5 went down the fast path with issue files
+// named `01-bring-back-the-last-removed-name.md` and ids of `01`, so it shipped three branches
+// called `slice/undo-a-removal/01`, `02` and `03` — against a contract that both SPEC.md and the
+// mode file state as `slice/<feature>/<NN>-<slug>`. The branch names are what a human reads at the
+// one step sdlc2 deliberately leaves to a person.
+//
+// The filename is the documented source of truth and `path` is already required, so the id is
+// recovered from there. Two things make this safe rather than clever:
+//
+//   `blockedBy` HOLDS IDS TOO. Renaming ids without rewriting the references would leave every
+//   dependency edge pointing at a name that no longer exists; `levelOf` would flatten the graph to
+//   one level and slices that must stack would build in parallel off the base instead. That is
+//   run 1's stacking defect, reintroduced by a cosmetic fix — so the rename map is applied to
+//   `blockedBy` in the same pass, and the probe asserts the LEVELS, not just the names.
+//
+//   IT IS ALL OR NOTHING. If the rewrite would collide two slices onto one id, nothing is renamed
+//   at all. A half-applied rename is worse than an ugly branch name in every case.
+const CANONICAL_ID = /^\d+-[a-z0-9][a-z0-9-]*$/
+function canonicalSliceIds(slices, note) {
+  const basename = (p) => String(p || '').split('/').pop().replace(/\.md$/i, '')
+  const rename = Object.create(null)
+  for (const sl of slices) {
+    if (CANONICAL_ID.test(sl.id)) continue
+    const from = basename(sl.path)
+    if (from && from !== sl.id && CANONICAL_ID.test(from)) rename[sl.id] = from
+  }
+  if (!Object.keys(rename).length) return slices
+  const seen = Object.create(null)
+  for (const sl of slices) {
+    const id = rename[sl.id] || sl.id
+    if (seen[id]) {
+      if (note) note(`slice ids left alone: recovering them from the issue filenames would collide two slices on "${id}". [SD-11]`)
+      return slices
+    }
+    seen[id] = true
+  }
+  const out = slices.map((sl) =>
+    Object.assign({}, sl, {
+      id: rename[sl.id] || sl.id,
+      // Unknown references are left verbatim — the level pass already ignores an id it does not
+      // know, and silently inventing an edge here would be worse than leaving a dangling one.
+      blockedBy: (sl.blockedBy || []).map((b) => rename[b] || b),
+    })
+  )
+  if (note) note(`slice ids recovered from the issue filenames so each branch says what it is: ${Object.keys(rename).map((k) => `${k} → ${rename[k]}`).join(', ')} [SD-11]`)
+  return out
 }
 
 // ────────────────────────────────────────────────────────── rubrics ────
@@ -464,6 +523,50 @@ function weightedTotal(name, verdict) {
 // throw these away between rounds, which cost twice: the maker was told "do not regress what
 // already passed" without being told WHAT passed, and the next round's checker re-scored from
 // cold, re-rolling judge variance against unchanged text. Both now receive them from round 2 on.
+// [R-REP-08] The MARGIN behind a score. `scoreBrief` above assembles exactly this data and hands
+// it to the NEXT round — so a node that passes on its first round computes a full per-criterion
+// breakdown, with each checker's stated reason, and then returns and discards it. Run 5 passed
+// every node on round 1 and every slice on attempt 1, so it threw away all six breakdowns and left
+// six aggregate numbers behind.
+//
+// That loses the only thing that answers whether the checkers are still adversarial. A total of
+// 0.87 is produced equally by a panel scoring everything near 0.87 and by a panel scoring almost
+// everything 1.0 with one criterion at 0.4 — a mild reviewer and a reviewer biting hard on one
+// specific thing, which are opposite findings. The aggregate cannot tell them apart and the
+// per-criterion scores can.
+//
+// MIN across the scoring checkers, matching how the total itself is computed: an adversarial panel
+// is only as green as its harshest lens, so the margin must be read through the same lens.
+function criterionLows(rubricName, verdicts, cap) {
+  const r = RUBRICS[rubricName]
+  if (!r) return []
+  const out = []
+  for (const c of r.criteria) {
+    let worst = null
+    let why = ''
+    for (const v of verdicts) {
+      if (!v || !Array.isArray(v.criteria)) continue
+      const got = v.criteria.find((x) => x && x.id === c.id)
+      if (!got || typeof got.score !== 'number') continue
+      const sc = Math.max(0, Math.min(1, got.score))
+      if (worst === null || sc < worst) {
+        worst = sc
+        why = got.why ? String(got.why).replace(/\s+/g, ' ').slice(0, 200) : ''
+      }
+    }
+    // A criterion no checker scored is already counted as zero by `weightedTotal`; say so here too
+    // rather than omitting it, because an absent row reads as "fine" and it is the opposite.
+    if (worst === null) out.push({ id: c.id, score: 0, weight: c.weight, why: 'no checker scored this criterion — counted as zero' })
+    else if (worst < 1) out.push({ id: c.id, score: worst, weight: c.weight, why: why })
+  }
+  // Gaps sort ahead of low marks — an unjudged criterion is worse news than a scored 0.5. The cap
+  // is a guard, not a filter: only criteria BELOW 1.0 are in this list and no rubric has more than
+  // six, so in practice nothing is ever trimmed. It was 4, which let four gaps hide a real low
+  // score entirely — the opposite of what this record is for.
+  out.sort((a, b) => a.score - b.score)
+  return out.slice(0, cap || 6)
+}
+
 function scoreBrief(verdicts) {
   const rows = []
   for (const v of verdicts) {
@@ -960,7 +1063,19 @@ async function runLoop(node) {
     // one boolean; whether the veto earns its rubber-stamping risk cannot be judged until the
     // count exists.
     const veto = !binaryFailed && score >= bar && open.length > 0
-    history.push({ round: round, score: score, defects: defects.length, open: open.length, binaryFailed: binaryFailed, veto: veto })
+    // [R-REP-08] The margin and the criteria that cost it, recorded on the round rather than fed
+    // forward and forgotten. A first-round pass is the case where this is the ONLY record.
+    const low = criterionLows(node.rubric, verdicts)
+    history.push({
+      round: round,
+      score: score,
+      margin: Math.round((score - bar) * 100) / 100,
+      defects: defects.length,
+      open: open.length,
+      binaryFailed: binaryFailed,
+      veto: veto,
+      low: low,
+    })
 
     log(
       `${label} round ${round}/${node.rounds}: score ${score} (bar ${bar}), ` +
@@ -1295,7 +1410,9 @@ async function buildSlices(node) {
     { schema: SLICES, model: 'sonnet', effort: 'medium', label: 'slices:resolve', phase: node.phase }
   )
   if (manifest.length) log(`${manifest.length} slice(s) taken from the product owner's own manifest — no resolver round-trip.`)
-  const slices = (plan && plan.slices) || []
+  // [SD-11] Applied to BOTH paths. The resolver is *told* the id is the NN-slug from the filename,
+  // but an instruction is not a guarantee — which is the whole reason the fast path drifted.
+  const slices = canonicalSliceIds((plan && plan.slices) || [], log)
   if (!slices.length) {
     log('No slices found — the product-owner node produced no issues.')
     return { node: node.id, verdict: 'hard-fail', score: null, rounds: 0, reason: 'no slices queued', slices: { shipped: [], escalated: [], skipped: [], rows: [], lanes: null } }
@@ -1424,6 +1541,8 @@ async function buildSlices(node) {
     // bar, so the two are indistinguishable in the report. Counting them apart is what lets a run
     // answer whether the severity veto ever binds on its own.
     let vetoed = 0
+    let reviewLow = [] // [R-REP-08] the criteria that cost the last attempt its margin
+    let reviewMargin = null
 
     while (attempt < rounds) {
       attempt++
@@ -1496,6 +1615,10 @@ async function buildSlices(node) {
       const open = blockingOpen(all)
       const veto = testerPass && reviewScore >= bar && open.length > 0 // [R-REP-07]
       if (veto) vetoed++
+      // [R-REP-08] Same reasoning one layer down: a slice that ships on attempt 1 is the case where
+      // the reviewer's per-criterion verdict is computed once and never seen by anyone.
+      reviewLow = criterionLows(node.rubric, [rv])
+      reviewMargin = Math.round((reviewScore - bar) * 100) / 100
 
       log(
         `${slice.id} attempt ${attempt}/${rounds}: tester ${testerPass ? 'GREEN' : 'RED'}, ` +
@@ -1506,7 +1629,7 @@ async function buildSlices(node) {
 
       if (testerPass && reviewScore >= bar && open.length === 0) {
         shipped.push({ id: slice.id, branch: build.branch, sha: build.sha })
-        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore, base: base, vetoed: vetoed })
+        rows.push({ id: slice.id, attempts: attempt, verdict: 'pass', sha: build.sha, branch: build.branch, review: reviewScore, base: base, vetoed: vetoed, reviewLow: reviewLow, reviewMargin: reviewMargin })
         done[slice.id] = true
         // The CANONICAL name, not the developer's reported one: the tester asserted HEAD is on
         // exactly this branch, so it is the only branch name in this loop backed by evidence.
@@ -1563,7 +1686,7 @@ async function buildSlices(node) {
     }
     const vh = (decision.records || []).map((r) => r.id).filter(Boolean)
     shipped.push({ id: slice.id, branch: lastGood.branch, sha: lastGood.sha, softPass: true, vh: vh })
-    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh, base: base, vetoed: vetoed })
+    rows.push({ id: slice.id, attempts: attempt, verdict: 'soft-pass', sha: lastGood.sha, branch: lastGood.branch, review: reviewScore, vh: vh, base: base, vetoed: vetoed, reviewLow: reviewLow, reviewMargin: reviewMargin })
     done[slice.id] = true
     branchOf[slice.id] = `slice/${FEATURE}/${slice.id}`
     log(`~ ${slice.id} shipped with accepted debt on ${lastGood.branch} (${vh.length} VH record(s)).`)
@@ -1687,8 +1810,10 @@ async function buildSlices(node) {
         `Do NOT delete any branch, do not touch '${BASE}', and do not commit anything. If a removal\n` +
         `fails, say which path and why, and stop rather than forcing anything else.\n` +
         `\nReturn the structured RELEASE object: \`released\` true only if \`git worktree list\` now\n` +
-        `shows the main checkout ALONE, \`remaining\` listing any path still there, and \`branches\`\n` +
-        `true only if every slice branch is still present.`,
+        `shows the main checkout ALONE, \`remaining\` listing any path still there, \`branches\`\n` +
+        `true only if every slice branch is still present, and [SD-12] \`container\` true only if you\n` +
+        `actually removed \`${WORKTREES}\` — false if it is still there for ANY reason, including a\n` +
+        `non-empty directory you correctly declined to delete. Do not report a step you did not take.`,
       { model: 'sonnet', effort: 'low', schema: RELEASE, label: 'worktrees:release', phase: node.phase }
     )
     // [E2-08] Read the answer. A release that failed, half-finished, or never replied is a
@@ -1706,7 +1831,7 @@ async function buildSlices(node) {
     if (answer.branches === false) {
       log(`⚠ the release reports a MISSING slice branch. The branches are the deliverable; the trees were the disposable part. [E2-08]`)
     }
-    return { asked: worktrees.length, released: answer.released === true, verified: true, remaining: answer.remaining || [], branches: answer.branches !== false, note: answer.notes || null }
+    return { asked: worktrees.length, released: answer.released === true, verified: true, remaining: answer.remaining || [], branches: answer.branches !== false, container: answer.container === true, note: answer.notes || null }
   }
 
   // [E-13] Flush the escalation notes concurrently. Each writes a `## Status` note to its own
@@ -1899,6 +2024,17 @@ async function writeReport(node) {
       `[SD-05] A round carrying \`errored: true\` is NOT a maker that collapsed — it is a spawn that\n` +
       `never answered, already retried once, i.e. infrastructure. Write it as \`errored\`, never as\n` +
       `\`rejected\`, and do not count it against the maker's work or read a trend through it;\n` +
+      `[R-REP-08] Then, for EVERY node with a score, a **Margin** line — never omitted, and never\n` +
+      `replaced by the score alone. Give \`margin\` (the score minus its bar) and then name the\n` +
+      `criteria in \`low\` from that node's LAST scored round, worst first, as \`ID score — reason\`.\n` +
+      `A node that passed on round 1 has exactly one scored round and this is the only place its\n` +
+      `per-criterion detail exists at all. Do NOT summarise \`low\` as "minor points": a total of\n` +
+      `0.87 is produced equally by a panel marking everything near 0.87 and by one marking almost\n` +
+      `everything 1.0 with a single criterion at 0.4, and those two say opposite things about how\n` +
+      `hard the checkers are pushing. The reader is looking for exactly that difference. A criterion\n` +
+      `whose reason says no checker scored it is a GAP, not a low mark — say so in those words.\n` +
+      `Do the same for each slice from its \`reviewMargin\` and \`reviewLow\`, in the slice table's\n` +
+      `reason column or one line beneath it;\n` +
       `[R-REP-07] Then ONE line from \`Vetoes\`, headed **Veto rounds**, and NEVER omitted — print it\n` +
       `even when every number is zero, because zero is the finding here and an absent line reads as\n` +
       `an unmeasured one. A veto round is a round that scored AT OR ABOVE its bar and was stopped by\n` +
@@ -1932,7 +2068,13 @@ async function writeReport(node) {
       `(4c) [E2-08] whether the slice worktrees were released, from \`Lanes.release\`. \`released\`\n` +
       `false, or a non-empty \`remaining\`, means trees still exist outside the repo holding branches\n` +
       `checked out — say which, because the next run's clean-tree gate will meet them. Omit this\n` +
-      `line only when no worktree was ever created;\n` +
+      `line only when no worktree was ever created.\n` +
+      `[SD-12] State the container directory from \`container\` and from NOTHING ELSE: true means it\n` +
+      `was removed, false means it is still on disk. Never write that it was removed on any other\n` +
+      `basis — not from the release agent's prose, not because the prompt asked for it, not because\n` +
+      `it follows from the trees being gone. Run 5's report claimed that removal, no field said it,\n` +
+      `and the directory is still there. Every sentence in this report must trace to a field above;\n` +
+      `where no field covers something, write nothing rather than the likely answer;\n` +
       `(5) a 2–3 sentence summary, then the next human action.\n\n` +
       `A node verdict of \`hard-fail\`, \`escalated\`, \`skipped\` or \`not-run\` MUST be stated as such\n` +
       `and never softened. If anything soft-passed, say so in the FIRST line of the summary — a run\n` +

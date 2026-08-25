@@ -296,7 +296,7 @@ const EXPORTS = [
   'escalationPrompt', 'rubricTable', 'conventions', 'runLoop', 'arbitrate', 'buildSlices', 'walk',
   'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt', 'spawn', 'SPAWN_RETRIES',
   'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs', 'settle',
-  'planLines', 'sliceTableLines', 'upstreamDisputes',
+  'planLines', 'sliceTableLines', 'upstreamDisputes', 'criterionLows', 'canonicalSliceIds',
 ]
 const ARGS = {
   feature: 'demo', title: 'Demo', runId: 'nf-test', defaultBranch: 'main',
@@ -1014,6 +1014,120 @@ await probe('R-REP-07 the veto tally reaches the report', async () => {
   // And the report is told never to drop the line, because an omitted zero reads as unmeasured.
   const src = R('new-feature.workflow.js')
   check(/NEVER omitted/.test(src) && /zero is the finding/.test(src), 'the report node is told to print it even at zero  [R-REP-07]')
+})
+
+// P17d — [SD-11] Slice ids name their branch, and the dependency edges survive being renamed.
+// Driven against run 5's ACTUAL manifest shape rather than invented data: bare numeric ids, issue
+// filenames that carry the slug, and two slices blocked by the first. That run shipped branches
+// called `slice/undo-a-removal/01`, `02`, `03` against a contract both SPEC.md and the mode file
+// state as `slice/<feature>/<NN>-<slug>`.
+//
+// The renaming half is cosmetic; the edge-rewriting half is not. `blockedBy` holds ids, so a
+// rename that misses them leaves every edge pointing at a name that no longer exists, `levelOf`
+// flattens to one level, and slices that must stack build in parallel off the base — run 1's
+// defect, reintroduced by the fix for a branch name. So this asserts the BASES, end to end,
+// not just the strings.
+await probe('SD-11 slice ids name their branch, edges intact', async () => {
+  const M = engine()
+  const run5 = [
+    { id: '01', path: '.sdlc2/features/undo-a-removal/issues/01-bring-back-the-last-removed-name.md', title: 'Bring back the last removed name', dir: '', blockedBy: [] },
+    { id: '02', path: '.sdlc2/features/undo-a-removal/issues/02-the-offer-ends-when-the-list-moves.md', title: 'The offer ends when the list moves', dir: '', blockedBy: ['01'] },
+    { id: '03', path: '.sdlc2/features/undo-a-removal/issues/03-the-held-entry-ages-like-the-rest.md', title: 'The held entry ages like the rest', dir: '', blockedBy: ['01'] },
+  ]
+  const fixed = M.canonicalSliceIds(run5)
+  check(fixed[0].id === '01-bring-back-the-last-removed-name', `the id is recovered from the filename (got '${fixed[0].id}')  [SD-11]`)
+  check(fixed[1].blockedBy[0] === '01-bring-back-the-last-removed-name', 'and every blockedBy reference is rewritten with it  [SD-11]')
+  check(fixed[2].blockedBy[0] === '01-bring-back-the-last-removed-name', 'for every slice that declared the edge  [SD-11]')
+
+  // An id that is ALREADY canonical is left completely alone — no churn on the good path.
+  const good = [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }]
+  check(M.canonicalSliceIds(good)[0].id === '01-a', 'a canonical id is untouched  [SD-11]')
+
+  // All or nothing: if recovering the ids would collide two slices, nothing is renamed.
+  const collide = [
+    { id: 'a', path: 'issues/01-x.md', title: 'A', dir: '', blockedBy: [] },
+    { id: 'b', path: 'issues/01-x.md', title: 'B', dir: '', blockedBy: [] },
+  ]
+  const kept = M.canonicalSliceIds(collide)
+  check(kept[0].id === 'a' && kept[1].id === 'b', 'a rename that would collide is abandoned whole, never half-applied  [SD-11]')
+
+  // End to end through the real build node, from the PO MANIFEST fast path — the path that drifted.
+  const said = []
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      const L = o.label || ''
+      said.push({ label: L, prompt: p })
+      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
+      if (L.startsWith('test:')) return { pass: true, defects: [] }
+      if (L.startsWith('review:')) return scoreAll(E.RUBRICS.build, 1)
+      return {}
+    },
+  })
+  E.results.po = { verdict: 'pass', maker: { ok: true, slices: run5 } }
+  const r = await E.buildSlices(E.NODES.build)
+  const row = (id) => r.slices.rows.find((x) => x.id === id)
+  check(!!row('01-bring-back-the-last-removed-name'), 'the build node ships the slugged id, not the bare number  [SD-11]')
+  const two = row('02-the-offer-ends-when-the-list-moves')
+  check(two && two.base === 'slice/demo/01-bring-back-the-last-removed-name',
+    `and a blocked slice is still cut from its blocker after the rename (base '${two && two.base}')  [SD-11 / R-BUILD-04]`)
+  check(said.some((x) => x.label.startsWith('slices:resolve')) === false, 'the po manifest fast path is the one under test  [E-13]')
+})
+
+// P17e — [R-REP-08] The per-criterion margin survives a first-round pass. `scoreBrief` assembles
+// this data for the NEXT round; a node that passes on round 1 computes it and returns. Run 5
+// passed all six loops on their first attempt, so it discarded all six breakdowns.
+await probe('R-REP-08 the margin survives a one-round pass', async () => {
+  const M = engine()
+  const lows = M.criterionLows('po', [{ criteria: [
+    { id: 'PO-AC', score: 1 }, { id: 'PO-INVEST', score: 0.5, why: 'no walking skeleton marked' },
+    { id: 'PO-GRILL', score: 1 }, { id: 'PO-LANG', score: 1 }, { id: 'PO-MOCK', score: 1 },
+  ] }])
+  check(lows.length === 1 && lows[0].id === 'PO-INVEST', 'only the criteria that cost margin are carried  [R-REP-08]')
+  check(/walking skeleton/.test(lows[0].why), "with the checker's own reason  [R-REP-08]")
+
+  // MIN across checkers, matching how the total itself is computed — the harshest lens decides.
+  const two = M.criterionLows('po', [
+    { criteria: [{ id: 'PO-AC', score: 1 }] },
+    { criteria: [{ id: 'PO-AC', score: 0.5, why: 'harsher lens' }] },
+  ])
+  const ac = two.find((x) => x.id === 'PO-AC')
+  check(ac && ac.score === 0.5, `the harshest lens is the one recorded (got ${ac && ac.score})  [R-REP-08]`)
+
+  // A criterion NOBODY scored already counts as zero in the total; it must read as a gap, not a
+  // low mark, or the report says "0" where the truth is "unjudged".
+  const missing = M.criterionLows('po', [{ criteria: [{ id: 'PO-AC', score: 1 }] }])
+  const gap = missing.find((x) => x.id === 'PO-INVEST')
+  check(!!gap && /no checker scored/.test(gap.why), 'an unscored criterion is named as a gap, not as a zero  [R-REP-08]')
+
+  // End to end: a node that passes in ONE round still carries its margin out.
+  const E = engine({
+    parallel: parallelReal,
+    agent: async (p, o) => {
+      if (isMake(o)) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
+      return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: c.id === 'PO-MOCK' ? 0.5 : 1 })), defects: [] }
+    },
+  })
+  const r = await E.runLoop(E.NODES.po)
+  check(r.verdict === 'pass' && r.rounds === 1, `the node passes on its first round (got '${r.verdict}' in ${r.rounds})`)
+  const h = r.history[r.history.length - 1]
+  check(typeof h.margin === 'number' && h.margin > 0, `the round records how much room it had (margin ${h.margin})  [R-REP-08]`)
+  check(h.low && h.low.length === 1 && h.low[0].id === 'PO-MOCK', 'and which criterion cost it — the only record that will ever exist  [R-REP-08]')
+})
+
+// P17f — [SD-12] The container claim is backed by a field. Run 5's report asserted the worktree
+// container "was empty and removed"; no field said so, and the directory is still on disk. The
+// report prompt already began "use exactly this data — invent nothing", so this is the first
+// caught case of a prompt-level prohibition failing in a real artifact.
+await probe('SD-12 the container claim is a field, not prose', async () => {
+  const src = R('new-feature.workflow.js')
+  check(/container: \{ type: 'boolean' \}/.test(src), 'RELEASE carries a container field at all  [SD-12]')
+  check(/`container` true only if you\\n` \+\n\s*`actually removed/.test(src) || /actually removed \\`\$\{WORKTREES\}\\`/.test(src),
+    'and the release agent is told to report only what it actually did  [SD-12]')
+  check(/State the container directory from \\`container\\` and from NOTHING ELSE/.test(src),
+    'the report may state it from that field and nothing else  [SD-12]')
+  check(/write nothing rather than the likely answer/.test(src),
+    'and is told to write nothing where no field covers a claim  [SD-12]')
 })
 
 // P22 — [E2-06] The po cannot declare "no UI stories" while queueing UI slices, and a slice

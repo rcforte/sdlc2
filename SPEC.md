@@ -372,6 +372,22 @@ checking anything out.
   from one that simply scored badly. Zero is a real answer and must reach the page: an omitted line
   reads as unmeasured, and unmeasured and zero call for opposite decisions about keeping the veto.
 
+- `[R-REP-08]` **MUST**: every scored node and slice reports its **margin** — the score minus its
+  bar — and the criteria that cost it, with the checker's stated reason. The engine already builds
+  this for the next round's prompts and discards it when a node passes on its first round, which is
+  exactly the case where it is the only record that will ever exist. An aggregate cannot separate a
+  panel marking everything near the total from one marking almost everything 1.0 with a single
+  criterion low, and those say opposite things about how hard the checkers are pushing. A criterion
+  no checker scored is reported as a **gap**, never as a zero: it already counts as zero in the
+  total, and printing it as a low mark hides that nobody judged it.
+- `[R-BUILD-07]` **MUST**: a slice's id is `NN-slug`, recovered from its issue **filename** when
+  the product owner's manifest supplies something else, and every `Blocked by:` reference is
+  rewritten in the same pass. The id becomes a git branch name, and only the fallback resolver was
+  ever told its format — the manifest fast path (`[E-13]`) was not, so run 5 shipped branches named
+  `slice/undo-a-removal/01`. Renaming without rewriting the references would flatten the dependency
+  graph and unstack slices that must stack, so a rewrite that would collide two ids is abandoned
+  whole rather than half-applied (`[SD-11]`).
+
 - `[R-REP-02]` **MUST**: the report is written on **every** outcome, including an aborted graph;
   it carries a row per node, a row per slice (including the base each was cut from), the open `VH`
   rows, and the makers' recorded `disputed` items — a maker's reasoned disagreement is a finding,
@@ -445,6 +461,8 @@ not cover it. Nothing here claims a rule is machine-checked when it is not.
 | R-REP-05 | the lane scheduler, the report prompt | the scheduler records `lanes` (batches, widest, install) and the build node carries it; the report prompt is handed it and told to state it either way | ✅ |
 | R-REP-06 | `writeReport()`'s node rows, the report prompt | probes assert a fan-out row carries `fanout` with its unit counts, review spread and attempts-against-cap, and that the prompt forbids the bare `—`/`0` cells | ✅ |
 | R-REP-07 | `runLoop`'s history rows, the slice loop, `writeReport()`'s tally | probes assert a round at or above bar with a critical open is flagged `veto` while a round that failed on SCORE is not, and that the tally reaches the report prompt — reading zero rather than going absent when nothing vetoed | ✅ |
+| R-REP-08 | `criterionLows()`, both loops' rows, the report prompt | probes assert the margin and the costing criteria survive a ONE-round pass, that the harshest lens is the one recorded, and that an unscored criterion reads as a gap rather than a zero | ✅ |
+| R-BUILD-07 | `canonicalSliceIds()`, the manifest intake | driven against run 5's real manifest shape: ids recover their slug, `blockedBy` is rewritten with them, a blocked slice is still cut from its blocker, and a colliding rewrite is abandoned whole | ✅ |
 | R-REP-03 | the report prompt | the prompt commits `.sdlc2/`+`docs/adr` to `sdlc2/<feature>` off the default branch, never `-B`, never stash/reset/force/clean | ✅ |
 | R-RUB-01 | `RUBRICS` vs §13 | weights sum to 1.00, thresholds in range, every criterion anchored — the criterion **texts** are compared by reading | ✅ 👁 |
 
