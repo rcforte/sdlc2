@@ -1,0 +1,799 @@
+<title>The sdlc2 Feature Graph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+
+<style>
+  :root {
+    --bg: #F2F5F3;
+    --surface: #FFFFFF;
+    --surface-2: #E8EEEB;
+    --ink: #101A18;
+    --ink-2: #4B5A56;
+    --rule: #D2DBD7;
+    --accent: #0E5B52;
+    --accent-soft: #D5E7E3;
+    --red: #9C3020;
+    --amber: #7F5A0D;
+    --shadow: 0 1px 2px rgba(16, 26, 24, .06), 0 8px 24px rgba(16, 26, 24, .05);
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0C1211;
+      --surface: #131B19;
+      --surface-2: #1B2523;
+      --ink: #E2E9E7;
+      --ink-2: #96A6A2;
+      --rule: #26332F;
+      --accent: #61D2C1;
+      --accent-soft: #14302B;
+      --red: #EA8B72;
+      --amber: #D6B15E;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0C1211;
+    --surface: #131B19;
+    --surface-2: #1B2523;
+    --ink: #E2E9E7;
+    --ink-2: #96A6A2;
+    --rule: #26332F;
+    --accent: #61D2C1;
+    --accent-soft: #14302B;
+    --red: #EA8B72;
+    --amber: #D6B15E;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 0 28px 120px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0 56px;
+  }
+
+  /* ── masthead ───────────────────────────────────────────── */
+  .masthead {
+    grid-column: 1 / -1;
+    padding: 68px 0 40px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 48px;
+  }
+  .kicker {
+    font-family: var(--display);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(38px, 6vw, 62px);
+    line-height: 1.02;
+    letter-spacing: -.026em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 21px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 40ch;
+    margin: 0;
+  }
+  .masthead-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    margin-top: 30px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+  .masthead-meta b { color: var(--ink); font-weight: 500; }
+
+  /* ── nav rail ───────────────────────────────────────────── */
+  nav.rail { display: none; }
+
+  @media (min-width: 1000px) {
+    .page { grid-template-columns: 190px minmax(0, 1fr); }
+    .masthead { grid-column: 1 / -1; }
+    nav.rail {
+      display: block;
+      position: sticky;
+      top: 34px;
+      align-self: start;
+      font-family: var(--display);
+      font-size: 13px;
+      padding-bottom: 60px;
+    }
+    main { grid-column: 2; min-width: 0; }
+  }
+
+  nav.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  nav.rail .rail-head {
+    font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-2); margin: 22px 0 8px; font-weight: 600;
+  }
+  nav.rail .rail-head:first-child { margin-top: 0; }
+  nav.rail a {
+    display: block; padding: 4px 0 4px 12px;
+    border-left: 2px solid var(--rule);
+    color: var(--ink-2); text-decoration: none; line-height: 1.35;
+  }
+  nav.rail a:hover, nav.rail a:focus-visible { color: var(--accent); border-left-color: var(--accent); }
+
+  /* ── sections ───────────────────────────────────────────── */
+  main > section { margin-bottom: 68px; scroll-margin-top: 28px; }
+  main > section:last-child { margin-bottom: 0; }
+
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 10.5px; font-weight: 600; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-2);
+    margin: 0 0 10px;
+  }
+  .eyebrow .dot { color: var(--accent); }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 700; font-size: 29px; line-height: 1.15;
+    letter-spacing: -.018em; margin: 0 0 18px; text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--display);
+    font-weight: 600; font-size: 18px; line-height: 1.3;
+    letter-spacing: -.008em; margin: 34px 0 10px;
+  }
+  p { margin: 0 0 16px; max-width: 68ch; }
+  main a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  ul, ol.steps { max-width: 68ch; padding-left: 20px; margin: 0 0 16px; }
+  li { margin-bottom: 8px; }
+  li::marker { color: var(--ink-2); }
+
+  code {
+    font-family: var(--mono); font-size: .87em;
+    background: var(--surface-2); border-radius: 3px;
+    padding: .12em .34em;
+  }
+  pre {
+    font-family: var(--mono); font-size: 13px; line-height: 1.65;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
+    padding: 16px 18px; overflow-x: auto; margin: 0 0 18px;
+    box-shadow: var(--shadow);
+  }
+  pre code { background: none; padding: 0; font-size: 13px; }
+  pre .c { color: var(--ink-2); }
+  pre .k { color: var(--accent); }
+
+  .lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; }
+
+  /* ── callout ────────────────────────────────────────────── */
+  .rule-box {
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px; margin: 0 0 20px; max-width: 68ch;
+  }
+  .rule-box p:last-child { margin-bottom: 0; }
+  .rule-box .label {
+    font-family: var(--display); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+    display: block; margin-bottom: 6px;
+  }
+  .rule-box.warn { border-left-color: var(--red); }
+  .rule-box.warn .label { color: var(--red); }
+
+  /* ── tables ─────────────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  th {
+    font-family: var(--display); font-size: 11px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2);
+    background: var(--surface-2); white-space: nowrap;
+  }
+  td code { white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  .verdict {
+    font-family: var(--display); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 3px; white-space: nowrap;
+    background: var(--surface-2); color: var(--ink-2);
+  }
+  .verdict.pass { background: var(--accent-soft); color: var(--accent); }
+  .verdict.soft { color: var(--amber); }
+  .verdict.fail { color: var(--red); }
+
+  /* ── figures ────────────────────────────────────────────── */
+  figure {
+    margin: 0 0 26px; padding: 22px 22px 16px;
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 8px; box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figure svg { display: block; width: 100%; min-width: 680px; height: auto; color: var(--ink); }
+  figcaption {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule);
+    font-size: 14px; line-height: 1.55; color: var(--ink-2); max-width: 76ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  .n-box { fill: var(--surface); stroke: currentColor; stroke-width: 1.2; }
+  .n-box-2 { fill: var(--surface-2); stroke: var(--rule); stroke-width: 1.2; }
+  .n-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .n-t { font-family: var(--display); font-size: 15px; font-weight: 600; fill: currentColor; }
+  .n-s { font-family: var(--mono); font-size: 12.5px; fill: var(--ink-2); }
+  .n-e { font-family: var(--mono); font-size: 12.5px; fill: var(--ink-2); }
+  .n-a { stroke: currentColor; stroke-width: 1.2; fill: none; }
+  .n-a-soft { stroke: var(--ink-2); stroke-width: 1.2; fill: none; stroke-dasharray: 5 4; }
+  .n-a-loop { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+  .n-loop-t { font-family: var(--mono); font-size: 12.5px; fill: var(--accent); }
+  .n-red { fill: var(--red); }
+
+  footer {
+    grid-column: 1 / -1;
+    margin-top: 80px; padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink-2);
+  }
+
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="kicker">Claude Code plugin · operator's guide</p>
+    <h1>The sdlc2 feature graph</h1>
+    <p class="standfirst">A harness that takes one grilled idea to merge-ready branches by making every step argue with an opponent before it is allowed to pass.</p>
+    <div class="masthead-meta">
+      <span>version <b>0.1.9</b></span>
+      <span>entry point <b>/sdlc2 new-feature</b></span>
+      <span>engine <b>new-feature.workflow.js</b></span>
+      <span>it never merges <b>you do</b></span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Contents">
+    <p class="rail-head">The mechanism</p>
+    <ol>
+      <li><a href="#what">What it is</a></li>
+      <li><a href="#graph">The graph</a></li>
+      <li><a href="#loop">The loop</a></li>
+      <li><a href="#build">Build fanout</a></li>
+    </ol>
+    <p class="rail-head">Using it</p>
+    <ol>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#project">Prepare the project</a></li>
+      <li><a href="#config">The config block</a></li>
+      <li><a href="#run">Run it</a></li>
+      <li><a href="#read">Read the result</a></li>
+      <li><a href="#merge">Merge the slices</a></li>
+    </ol>
+    <p class="rail-head">Reference</p>
+    <ol>
+      <li><a href="#invariants">Rules that never bend</a></li>
+      <li><a href="#trouble">When it stops</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <!-- ─────────────────────────────────────── what it is ── -->
+    <section id="what">
+      <p class="eyebrow"><span class="dot">◆</span> Orientation</p>
+      <h2>What the harness actually does</h2>
+      <p class="lede">You describe a feature. It writes the product framing, the architecture, the UX structure and the code — then commits each vertical slice on its own branch and hands you a list of the judgement calls it had to make alone.</p>
+      <p>Two ideas do all the work, and they are worth naming before anything else, because everything in the run is one of them.</p>
+      <ul>
+        <li><b>The graph.</b> The run is a fixed, declared set of steps with edges between them. Nothing decides at runtime what happens next; the edges do. A step starts the moment its predecessors have settled, and a step never re-opens an earlier one.</li>
+        <li><b>The loop.</b> Every step is itself a small contest: one agent makes the artifact, one or more independent agents are told to <em>refute</em> it, and the step passes only if the harshest of them scores it above the bar with nothing serious outstanding. Otherwise it goes round again with the defects in hand.</li>
+      </ul>
+      <p>The graph decides <em>what runs and when</em>. The loop decides <em>whether the thing it produced is good enough to pass on</em>. Everything else — worktrees, branches, arbiters, the report — is plumbing around those two.</p>
+    </section>
+
+    <!-- ─────────────────────────────────────────── graph ── -->
+    <section id="graph">
+      <p class="eyebrow"><span class="dot">◆</span> Mechanism · one</p>
+      <h2>The graph: five steps, no back-edges</h2>
+      <p>Every step is a row of data — who makes it, who checks it, how many rounds it gets, what it must produce, when it may be skipped, and which steps come next. The executor reads that table, works out each step's predecessors from the <code>next</code> lists, and starts anything whose predecessors have settled. It names no step by hand, which is why adding one changes no code in the executor.</p>
+
+      <figure>
+        <svg viewBox="0 0 1056 372" role="img" aria-label="The sdlc2 run graph: human grilling feeds the product-owner step, which fans out to architect and, only when the feature has UI stories, to UX. Architect feeds build; UX joins build per UI slice and also feeds report. Build and UX both feed report, which hands slice branches back to the human. A disagreement with an earlier step becomes a human-verify record instead of a back-edge.">
+          <defs>
+            <marker id="ga" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="gs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-2)"></path>
+            </marker>
+          </defs>
+
+          <!-- boxes -->
+          <rect class="n-box-2" x="16" y="87" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="78" y="110" text-anchor="middle">grilling</text>
+          <text class="n-s" x="78" y="128" text-anchor="middle">you, in chat</text>
+
+          <rect class="n-box" x="196" y="87" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="258" y="110" text-anchor="middle">po</text>
+          <text class="n-s" x="258" y="128" text-anchor="middle">stories · slices</text>
+
+          <rect class="n-box" x="376" y="60" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="438" y="83" text-anchor="middle">architect</text>
+          <text class="n-s" x="438" y="101" text-anchor="middle">design · ADRs</text>
+
+          <rect class="n-box" x="376" y="170" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="438" y="193" text-anchor="middle">ux</text>
+          <text class="n-s" x="438" y="211" text-anchor="middle">state matrix</text>
+
+          <rect class="n-accent" x="556" y="87" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="618" y="110" text-anchor="middle">build</text>
+          <text class="n-s" x="618" y="128" text-anchor="middle">one loop / slice</text>
+
+          <rect class="n-box" x="736" y="87" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="798" y="110" text-anchor="middle">report</text>
+          <text class="n-s" x="798" y="128" text-anchor="middle">runs always</text>
+
+          <rect class="n-box-2" x="916" y="87" width="124" height="56" rx="4"></rect>
+          <text class="n-t" x="978" y="110" text-anchor="middle">merge</text>
+          <text class="n-s" x="978" y="128" text-anchor="middle">you, by hand</text>
+
+          <!-- edges -->
+          <line class="n-a" x1="140" y1="115" x2="190" y2="115" marker-end="url(#ga)"></line>
+          <text class="n-e" x="165" y="103" text-anchor="middle">seed</text>
+
+          <path class="n-a" d="M 320 108 L 370 90" marker-end="url(#ga)"></path>
+          <text class="n-e" x="348" y="82" text-anchor="middle">issues/</text>
+
+          <path class="n-a" d="M 320 124 L 370 194" marker-end="url(#ga)"></path>
+          <polygon points="345,152 353,160 345,168 337,160" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.4"></polygon>
+          <text class="n-e" x="336" y="180" text-anchor="end">gate: hasUiStories</text>
+
+          <path class="n-a" d="M 500 90 L 550 106" marker-end="url(#ga)"></path>
+          <text class="n-e" x="528" y="82" text-anchor="middle">the seam</text>
+
+          <path class="n-a-soft" d="M 500 194 L 550 132" marker-end="url(#gs)"></path>
+          <text class="n-e" x="376" y="246" text-anchor="start">per-slice join · UI slices only</text>
+
+          <line class="n-a" x1="680" y1="115" x2="730" y2="115" marker-end="url(#ga)"></line>
+          <path class="n-a" d="M 500 220 C 640 300 720 280 790 150" marker-end="url(#ga)"></path>
+
+          <line class="n-a" x1="860" y1="115" x2="910" y2="115" marker-end="url(#ga)"></line>
+          <text class="n-e" x="885" y="103" text-anchor="middle">slice/*</text>
+
+          <!-- no back-edge -->
+          <rect class="n-box-2" x="40" y="286" width="240" height="48" rx="4"></rect>
+          <text class="n-t" x="160" y="308" text-anchor="middle">VERIFY-WITH-HUMAN.md</text>
+          <text class="n-s" x="160" y="325" text-anchor="middle">append-only · one row per call</text>
+          <path class="n-a-soft" d="M 378 118 C 340 200 330 250 272 284" marker-end="url(#gs)"></path>
+          <text class="n-e" x="296" y="306" text-anchor="start">disagreement with an earlier step</text>
+          <text class="n-e" x="296" y="322" text-anchor="start">— never a back-edge</text>
+        </svg>
+        <figcaption><b>Solid arrows are unconditional; dashed arrows are conditional.</b> The <code>ux</code> step runs only if the product owner declared the feature has screens, and that predicate is evaluated by the executor, never by an agent. There is no wave barrier: a backend slice starts building while <code>ux</code> is still working, because the wait on <code>ux</code> is taken per slice inside <code>build</code>, not on the edge. <code>report</code> runs under every outcome, including an aborted graph — a run nobody can read is indistinguishable from a run that never happened.</figcaption>
+      </figure>
+
+      <h3>What "settled" means for the steps downstream</h3>
+      <p>A step that hard-fails, crashes, or is dropped for want of budget blocks everything after it: if <code>po</code> dies the graph is over, and if <code>architect</code> dies <code>build</code> is skipped. A step skipped by its <em>gate</em> is different — a feature with no screens is not a failure, so <code>ux</code> being gated off blocks nothing.</p>
+      <p>There are no back-edges anywhere. When the architect thinks the product owner queued the slices wrong, it does not edit the issues and it does not declare a different dependency graph in its own document. It files the disagreement and a human-verify row naming the file to amend. Two artifacts of one run asserting different graphs, with only one of them executable, is the failure this rule exists to prevent.</p>
+    </section>
+
+    <!-- ──────────────────────────────────────────── loop ── -->
+    <section id="loop">
+      <p class="eyebrow"><span class="dot">◆</span> Mechanism · two</p>
+      <h2>The loop: make, refute, score, repeat</h2>
+      <p>Every step in the graph has the same body. One implementation runs all of them, and the only things that vary are which personas fill the roles, which rubric is used, and how many rounds there are — two at the document steps, five attempts per slice at <code>build</code>.</p>
+
+      <figure>
+        <svg viewBox="0 0 990 392" role="img" aria-label="The loop inside one graph step: a fresh maker agent produces the artifact; two mutually blind checker agents refute it in parallel; the engine computes each checker's weighted total from its per-criterion scores and takes the minimum; three gates must all pass. Any failure sends the deduped defects and the per-criterion scores into the next round with a brand new maker. When the rounds run out, a single arbiter call soft-passes the step and writes a human-verify record.">
+          <defs>
+            <marker id="la" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="ll" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+
+          <rect class="n-box" x="20" y="110" width="170" height="64" rx="4"></rect>
+          <text class="n-t" x="105" y="134" text-anchor="middle">maker</text>
+          <text class="n-s" x="105" y="152" text-anchor="middle">round n · fresh agent</text>
+          <text class="n-s" x="105" y="167" text-anchor="middle">writes to disk</text>
+
+          <rect class="n-box" x="220" y="26" width="180" height="52" rx="4"></rect>
+          <text class="n-t" x="310" y="48" text-anchor="middle">checker A</text>
+          <text class="n-s" x="310" y="66" text-anchor="middle">mandate: refute</text>
+
+          <rect class="n-box" x="220" y="140" width="180" height="52" rx="4"></rect>
+          <text class="n-t" x="310" y="162" text-anchor="middle">checker B</text>
+          <text class="n-s" x="310" y="180" text-anchor="middle">mandate: refute</text>
+
+          <rect class="n-box" x="430" y="88" width="160" height="80" rx="4"></rect>
+          <text class="n-t" x="510" y="112" text-anchor="middle">the engine</text>
+          <text class="n-s" x="510" y="130" text-anchor="middle">scores × weights</text>
+          <text class="n-s" x="510" y="146" text-anchor="middle">per checker</text>
+          <text class="n-s" x="510" y="161" text-anchor="middle">then MIN, not mean</text>
+
+          <rect class="n-accent" x="620" y="84" width="190" height="88" rx="4"></rect>
+          <text class="n-t" x="715" y="106" text-anchor="middle">all three, or nothing</text>
+          <text class="n-s" x="715" y="126" text-anchor="middle">binary checker green</text>
+          <text class="n-s" x="715" y="142" text-anchor="middle">MIN ≥ 0.80</text>
+          <text class="n-s" x="715" y="158" text-anchor="middle">no open critical</text>
+
+          <rect class="n-box" x="840" y="104" width="130" height="48" rx="4"></rect>
+          <text class="n-t" x="905" y="126" text-anchor="middle">pass</text>
+          <text class="n-s" x="905" y="143" text-anchor="middle">step settles</text>
+
+          <rect class="n-box" x="700" y="250" width="270" height="50" rx="4"></rect>
+          <text class="n-t" x="835" y="272" text-anchor="middle">arbiter — exactly one call</text>
+          <text class="n-s" x="835" y="290" text-anchor="middle">the maker's persona, opus/high</text>
+
+          <rect class="n-box" x="700" y="322" width="270" height="50" rx="4"></rect>
+          <text class="n-t" x="835" y="344" text-anchor="middle">soft-pass, never pass</text>
+          <text class="n-s" x="835" y="362" text-anchor="middle">+ one human-verify record</text>
+
+          <line class="n-a" x1="190" y1="130" x2="214" y2="60" marker-end="url(#la)"></line>
+          <line class="n-a" x1="190" y1="152" x2="214" y2="162" marker-end="url(#la)"></line>
+          <text class="n-e" x="196" y="98" text-anchor="start">in parallel,</text>
+          <text class="n-e" x="196" y="112" text-anchor="start">mutually blind</text>
+
+          <line class="n-a" x1="400" y1="56" x2="424" y2="104" marker-end="url(#la)"></line>
+          <line class="n-a" x1="400" y1="166" x2="424" y2="152" marker-end="url(#la)"></line>
+          <line class="n-a" x1="590" y1="128" x2="614" y2="128" marker-end="url(#la)"></line>
+          <line class="n-a" x1="810" y1="128" x2="834" y2="128" marker-end="url(#la)"></line>
+
+          <polyline class="n-a-loop" points="660,172 660,290 105,290 105,180" marker-end="url(#ll)"></polyline>
+          <text class="n-loop-t" x="140" y="306" text-anchor="start">any gate fails → round n+1, carrying the deduped</text>
+          <text class="n-loop-t" x="140" y="322" text-anchor="start">defects (each quoting evidence) and last round&apos;s</text>
+          <text class="n-loop-t" x="140" y="338" text-anchor="start">per-criterion scores. A brand new agent each time.</text>
+
+          <line class="n-a" x1="770" y1="172" x2="770" y2="244" marker-end="url(#la)"></line>
+          <text class="n-e" x="780" y="206" text-anchor="start">rounds spent</text>
+          <line class="n-a" x1="835" y1="300" x2="835" y2="316" marker-end="url(#la)"></line>
+        </svg>
+        <figcaption><b>The bar is a floor with three separate keys, and the loop itself never arbitrates.</b> It reports <em>needs-arbitration</em> and the step runner makes the single arbiter call. One thing is outside the arbiter's reach entirely: a red test suite at <code>build</code>. No score, no deadline and no arbiter may sign off over it, and the arbiter is forbidden from committing, so the commit a slice ships is the commit a tester actually passed.</figcaption>
+      </figure>
+
+      <h3>Why the minimum, and why the checkers cannot see each other</h3>
+      <p>Each checker scores a fixed rubric of five criteria, each one anchored at 0.0, 0.5 and 1.0, and the engine — not the checker — multiplies those by the weights. A total the checker asserts for itself is ignored, and a criterion it did not score counts as zero. Across checkers the step takes the <em>minimum</em>: an adversarial panel is only as green as its harshest lens. Checkers in a round run at the same time and no prompt contains another's verdict, so agreement between them is evidence rather than an echo.</p>
+
+      <h3>Silence is never approval</h3>
+      <p>An agent that never answered is retried once for free, because a dropped connection is not a mistake worth recording. If the retry also fails the round is spent and marked <em>errored</em> rather than <em>rejected</em>, and the defect is filed against the harness so no maker is ever handed "you returned nothing" as work to repair. A round in which a scoring checker failed to report scores zero, never a vacuous one.</p>
+
+      <h3>The rubrics</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Step</th><th>Bar</th><th>Rounds</th><th>What the checker weighs</th></tr></thead>
+          <tbody>
+            <tr><td><code>po</code></td><td class="num">0.80</td><td class="num">2</td><td>Gherkin quality 0.30 · INVEST vertical slices 0.25 · every seed decision landed 0.15 · the seed's own vocabulary 0.15 · mockup matches the happy paths 0.15</td></tr>
+            <tr><td><code>architect</code></td><td class="num">0.80</td><td class="num">2</td><td>boundaries and invariants 0.30 · the test seam named per slice 0.25 · ADR completeness 0.20 · fit with the existing code 0.15 · each slice buildable in one sitting 0.10</td></tr>
+            <tr><td><code>ux</code></td><td class="num">0.80</td><td class="num">2</td><td>state matrix per screen 0.30 · flows and recovery 0.25 · structural WCAG AA 0.20 · information architecture 0.15 · extends the mockup in place 0.10</td></tr>
+            <tr><td><code>build</code></td><td class="num">0.80</td><td class="num">5</td><td>Clean Code 0.30 · DDD in the code 0.25 · idiomatic for <em>your</em> stack 0.20 · tests assert behaviour 0.15 · no duplication or dead code 0.10 — plus a separate binary tester that is never averaged in</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>At the document steps only a <em>critical</em> defect can veto a passing score. At <code>build</code>, <em>high</em> vetoes too, because that is where the checker has executable ground truth behind it.</p>
+    </section>
+
+    <!-- ─────────────────────────────────────────── build ── -->
+    <section id="build">
+      <p class="eyebrow"><span class="dot">◆</span> Mechanism · three</p>
+      <h2>Where the two compose: one graph step, many loops</h2>
+      <p><code>build</code> is a single node in the graph, and inside it the loop runs once per slice — concurrently, when the slices do not depend on each other. This is the whole design in one place: the graph says <em>build comes after architect</em>, and the loop says <em>this slice is not done until a green suite and a code review both agree</em>.</p>
+
+      <figure>
+        <svg viewBox="0 0 990 352" role="img" aria-label="Inside the build step: slices come from the product owner's own manifest and are levelled from their Blocked by lines. Independent slices run concurrently in lanes, each in its own git worktree outside the repository, and each lane runs the same maker-checker loop with a developer, a tester and a code reviewer for up to five attempts. A blocked slice is cut from its blocker's branch and starts the moment that blocker settles. Each lane ends on its own slice branch.">
+          <defs>
+            <marker id="ba" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <rect class="n-accent" x="16" y="132" width="120" height="56" rx="4"></rect>
+          <text class="n-t" x="76" y="155" text-anchor="middle">build</text>
+          <text class="n-s" x="76" y="173" text-anchor="middle">one graph step</text>
+
+          <rect class="n-box" x="176" y="122" width="190" height="76" rx="4"></rect>
+          <text class="n-t" x="271" y="146" text-anchor="middle">the queue</text>
+          <text class="n-s" x="271" y="164" text-anchor="middle">slices from po's manifest</text>
+          <text class="n-s" x="271" y="180" text-anchor="middle">levelled from Blocked by:</text>
+
+          <rect class="n-box" x="406" y="20" width="250" height="66" rx="4"></rect>
+          <text class="n-t" x="531" y="43" text-anchor="middle">lane · slice 01</text>
+          <text class="n-s" x="531" y="61" text-anchor="middle">developer ⇄ tester + reviewer</text>
+          <text class="n-s" x="531" y="77" text-anchor="middle">≤ 5 attempts · own worktree</text>
+
+          <rect class="n-box" x="406" y="127" width="250" height="66" rx="4"></rect>
+          <text class="n-t" x="531" y="150" text-anchor="middle">lane · slice 02</text>
+          <text class="n-s" x="531" y="168" text-anchor="middle">developer ⇄ tester + reviewer</text>
+          <text class="n-s" x="531" y="184" text-anchor="middle">≤ 5 attempts · own worktree</text>
+
+          <rect class="n-box" x="406" y="234" width="250" height="66" rx="4"></rect>
+          <text class="n-t" x="531" y="257" text-anchor="middle">slice 03 — blocked by 01</text>
+          <text class="n-s" x="531" y="275" text-anchor="middle">cut from slice 01's branch</text>
+          <text class="n-s" x="531" y="291" text-anchor="middle">starts when 01 settles, not the level</text>
+
+          <rect class="n-box-2" x="716" y="20" width="258" height="66" rx="4"></rect>
+          <text class="n-s" x="845" y="48" text-anchor="middle">slice/&lt;feature&gt;/01-… @ sha</text>
+          <text class="n-s" x="845" y="66" text-anchor="middle">the sha the tester passed</text>
+
+          <rect class="n-box-2" x="716" y="127" width="258" height="66" rx="4"></rect>
+          <text class="n-s" x="845" y="155" text-anchor="middle">slice/&lt;feature&gt;/02-… @ sha</text>
+          <text class="n-s" x="845" y="173" text-anchor="middle">the sha the tester passed</text>
+
+          <rect class="n-box-2" x="716" y="234" width="258" height="66" rx="4"></rect>
+          <text class="n-s" x="845" y="262" text-anchor="middle">slice/&lt;feature&gt;/03-… @ sha</text>
+          <text class="n-s" x="845" y="280" text-anchor="middle">contains 01, and only 01</text>
+
+          <line class="n-a" x1="136" y1="160" x2="170" y2="160" marker-end="url(#ba)"></line>
+          <path class="n-a" d="M 366 148 L 400 56" marker-end="url(#ba)"></path>
+          <line class="n-a" x1="366" y1="160" x2="400" y2="160" marker-end="url(#ba)"></line>
+          <path class="n-a" d="M 366 172 L 400 262" marker-end="url(#ba)"></path>
+          <text class="n-e" x="376" y="112" text-anchor="start">in lanes</text>
+
+          <line class="n-a" x1="656" y1="53" x2="710" y2="53" marker-end="url(#ba)"></line>
+          <line class="n-a" x1="656" y1="160" x2="710" y2="160" marker-end="url(#ba)"></line>
+          <line class="n-a" x1="656" y1="267" x2="710" y2="267" marker-end="url(#ba)"></line>
+
+          <path class="n-a-soft" d="M 845 86 C 900 108 900 200 862 228"></path>
+          <text class="n-e" x="878" y="160" text-anchor="start">base</text>
+
+          <text class="n-e" x="16" y="320" text-anchor="start">Lanes open only when the project declares an install command.</text>
+          <text class="n-e" x="16" y="338" text-anchor="start">Worktrees live in ../.sdlc2-worktrees/&lt;feature&gt;-&lt;runId&gt;/ — outside the repo.</text>
+        </svg>
+        <figcaption><b>The tester proves the base with git before it judges any behaviour.</b> The declared base must be an ancestor of <code>HEAD</code>, every blocker's branch must be, and no other slice's branch may be — a violation is a critical defect. The developer's word that it branched correctly is not evidence: on the first real run a developer stacked four independent slices anyway and the reviewer scored a diff containing three other slices' code at 0.86 without noticing.</figcaption>
+      </figure>
+
+      <div class="rule-box">
+        <span class="label">The one config line that changes the shape of the run</span>
+        <p>Parallel lanes open only when your project declares <code>commands.install</code>. A fresh worktree has no installed dependencies, so without that command the test suite cannot run there and the engine stays sequential — and says in the log that it did, and why. Give it whatever makes a freshly-checked-out tree testable: <code>npm ci</code>, <code>./mvnw -q dependency:go-offline</code>, <code>uv sync</code>.</p>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────── install ── -->
+    <section id="install">
+      <p class="eyebrow"><span class="dot">◆</span> Setup · one</p>
+      <h2>Install</h2>
+      <p>macOS, and Windows under WSL:</p>
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/rcforte/sdlc2/main/install.sh | bash</code></pre>
+      <p>Windows, native PowerShell:</p>
+      <pre><code>irm https://raw.githubusercontent.com/rcforte/sdlc2/main/install.ps1 | iex</code></pre>
+      <p>Either script installs through Claude Code's own plugin CLI and then checks that the host actually registered the nine personas and four skills — the most likely thing to go wrong on a first install. Re-running is safe: it updates and re-checks, so it is also the repair path. <b>Restart Claude Code afterwards.</b></p>
+      <p>By hand, it is two commands:</p>
+      <pre><code>claude plugin marketplace add rcforte/sdlc2
+claude plugin install sdlc2@sdlc2-marketplace --scope user</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Task</th><th>Command</th></tr></thead>
+          <tbody>
+            <tr><td>Update</td><td>re-run the installer, or <code>claude plugin update sdlc2</code></td></tr>
+            <tr><td>Repair or diagnose</td><td>re-run the installer — it re-checks the inventory</td></tr>
+            <tr><td>Uninstall</td><td><code>claude plugin uninstall sdlc2@sdlc2-marketplace</code>, then <code>claude plugin marketplace remove sdlc2-marketplace</code></td></tr>
+            <tr><td>Work on sdlc2 itself</td><td><code>claude plugin marketplace add ~/dev/code/sdlc2</code> — your clone becomes the installed plugin</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Use the qualified id <code>sdlc2@sdlc2-marketplace</code> throughout. <code>claude plugin details</code> accepts the bare name but <code>claude plugin update</code> answers <em>Plugin "sdlc2" not found</em>.</p>
+
+      <div class="rule-box warn">
+        <span class="label">Restart, or you will measure the wrong engine</span>
+        <p>A Claude Code session fixes its plugin directory when it starts, and the cache keeps every installed version side by side. After a mid-session update the old path keeps resolving and keeps working — silently. Two early runs of this plugin, about 6.3 million agent tokens, executed 0.1.1 while 0.1.2 was the installed version. The run now prints which engine it is on its first line, and refuses to start from a superseded one.</p>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────── project ── -->
+    <section id="project">
+      <p class="eyebrow"><span class="dot">◆</span> Setup · two</p>
+      <h2>What your project must already have</h2>
+      <p>sdlc2 builds features into an existing project. It cannot create one, because it refuses to start until your test command is green. Before the first run:</p>
+      <ol class="steps">
+        <li><b>A git repository, and a clean tree.</b> <code>git status --porcelain</code> must be empty. Slices commit; stray changes would be swept into them.</li>
+        <li><b>Your session rooted at that repository.</b> There is no <code>repoRoot</code> argument — subagents inherit the session's directory. A session started elsewhere will cut <code>slice/*</code> branches and write <code>.sdlc2/</code> into <em>that</em> repo instead, plausibly and silently. A <code>cd</code> in a shell command does not fix it.</li>
+        <li><b>A resolvable default branch.</b> Every slice branch is cut from it.</li>
+        <li><b>A green test suite.</b> The command in your config is run once before the graph starts. A red baseline makes every later verdict meaningless.</li>
+        <li><b>An ignore rule for your harness's own worktrees</b> — commonly <code>.claude/worktrees/</code>. Those are created inside the repository; an un-ignored one shows as untracked and fails the clean-tree check. sdlc2's own slice worktrees need no rule, because they live outside the repo.</li>
+        <li><b>A writable parent directory</b>, since <code>../.sdlc2-worktrees/</code> is created there. A stale one from an aborted run is harmless — every run stamps its own container.</li>
+      </ol>
+    </section>
+
+    <!-- ─────────────────────────────────────────── config ── -->
+    <section id="config">
+      <p class="eyebrow"><span class="dot">◆</span> Setup · three</p>
+      <h2>The config block — the only configuration there is</h2>
+      <p>It lives in your project's own <code>CLAUDE.md</code>, inside a fenced YAML block delimited by an HTML comment. There is no second config file to drift against. The first run proposes the block, shows it to you, and asks before writing — that file is yours and it loads into every session.</p>
+
+      <pre><code><span class="c">## sdlc2</span>
+<span class="c">&lt;!-- sdlc2:config --&gt;</span>
+```yaml
+<span class="k">stack</span>:  "Java 21, Spring Boot 3, JUnit 5"   <span class="c"># what the reviewer judges idiom against</span>
+<span class="k">lanes</span>:  4                                    <span class="c"># optional; max slices at once. Default 4</span>
+<span class="k">commands</span>:
+  <span class="k">test</span>:    "./mvnw -q test"                 <span class="c"># MANDATORY — the tester's only oracle</span>
+  <span class="k">install</span>: "./mvnw -q dependency:go-offline" <span class="c"># optional; UNLOCKS PARALLEL LANES</span>
+  <span class="k">build</span>:   ""                               <span class="c"># optional; omit what the stack lacks</span>
+  <span class="k">run</span>:     ""
+  <span class="k">e2e</span>:     ""
+<span class="k">seam</span>:
+  <span class="k">backend</span>:  "REST via MockMvc (@SpringBootTest)"
+  <span class="k">frontend</span>: ""                              <span class="c"># empty until a frontend exists</span>
+```
+<span class="c">&lt;!-- /sdlc2:config --&gt;</span></code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field</th><th>Required</th><th>What actually reads it</th></tr></thead>
+          <tbody>
+            <tr><td><code>commands.test</code></td><td><b>Yes</b></td><td>The tester, on every attempt, and the baseline check before the graph starts. Absent or empty and the run refuses — twice, once before the engine and once inside it.</td></tr>
+            <tr><td><code>stack</code></td><td>Strongly advised</td><td>Put in front of every persona. sdlc2 has no house stack; this line is what the developer writes in and what the reviewer judges idiom against.</td></tr>
+            <tr><td><code>commands.install</code></td><td>No</td><td>The lane gate. Present → independent slices build concurrently in their own worktrees. Absent → strictly sequential.</td></tr>
+            <tr><td><code>lanes</code></td><td>No</td><td>The concurrency cap. Default 4. Root-level only — it is not merged per directory.</td></tr>
+            <tr><td><code>seam.backend</code> / <code>seam.frontend</code></td><td>No</td><td>How an acceptance test is driven here. The architect names the seam per slice; this is the house style it starts from.</td></tr>
+            <tr><td><code>commands.build</code> · <code>run</code> · <code>e2e</code></td><td>No</td><td>Handed to the developer and the tester where the stack has them. Omit what does not exist.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>A <code>CLAUDE.md</code> nested in a subdirectory overrides the root block for slices whose files live under it, longest matching path wins. That is how a monorepo gets per-area commands without a separate context map: a <code>ui/CLAUDE.md</code> declaring <code>npm test</code> next to a root declaring <code>mvn verify</code>.</p>
+
+      <div class="rule-box warn">
+        <span class="label">Make sure your test command really tests</span>
+        <p>The tester runs your declared command and reads its output. A suite that quietly skips its integration tests — a container flag that disables them without Docker, a fixture excluded from the runner — is indistinguishable from a real pass, and no rubric will ask. Choose the command that fails when the feature is broken, not the one that is fastest to go green.</p>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────── run ── -->
+    <section id="run">
+      <p class="eyebrow"><span class="dot">◆</span> Product → Design → Build → Report</p>
+      <h2>Running it</h2>
+      <pre><code>/sdlc2 new-feature "guest checkout"   <span class="c"># the whole graph</span>
+/sdlc2 status                         <span class="c"># features, verdicts, open rows, branches</span>
+/sdlc2 help</code></pre>
+
+      <h3>The first run in a repo is interactive, briefly</h3>
+      <p>Two things happen in the conversation before anything autonomous starts, and they happen there for a structural reason: a workflow's subagents have no channel back to you, so a workflow can never interview.</p>
+      <ol class="steps">
+        <li><b>It grills you</b>, if there is no seed yet, and writes the shared understanding to <code>.sdlc2/features/&lt;slug&gt;/feature.md</code> under six headings: capability, agreed scope, out of scope, decisions, ubiquitous language, open questions. The product-owner step is scored on covering every one of them, so a thin seed shows up two steps later as a low score.</li>
+        <li><b>It proposes the config block</b> and asks before appending it to your <code>CLAUDE.md</code>.</li>
+      </ol>
+      <p>After that the graph runs to the end unattended. Watch the log if you like: every round prints its round number, its score against the bar, its defect count, and whether a veto or a red suite stopped it.</p>
+
+      <h3>What lands in your repo</h3>
+      <pre><code>.sdlc2/features/&lt;slug&gt;/
+  feature.md              the grilled seed, extended by the product owner
+  mockup.html             happy paths from po, state variants added by ux — ONE file
+  design.md               domain model, boundaries, the seam per slice
+  issues/NN-slug.md       one vertical slice each, with Gherkin and Blocked by:
+  VERIFY-WITH-HUMAN.md    every call an arbiter made for you — append-only
+  runs/&lt;runId&gt;.md         node table · slice table · open rows
+docs/adr/NNNN-*.md        architecture decisions
+slice/&lt;feature&gt;/NN-slug   one branch per slice
+sdlc2/&lt;feature&gt;           the paperwork commit, cut from your default branch</code></pre>
+      <p>The run report is written under every outcome, including a graph that aborted. If it is missing, the workflow never started — bad arguments or a missing test command — and the error text says which.</p>
+    </section>
+
+    <!-- ───────────────────────────────────────────── read ── -->
+    <section id="read">
+      <p class="eyebrow"><span class="dot">◆</span> After the run</p>
+      <h2>Reading the result</h2>
+      <p>Each step reports a verdict, a score and the rounds it consumed.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Verdict</th><th>What it means</th></tr></thead>
+          <tbody>
+            <tr><td><span class="verdict pass">pass</span></td><td>Cleared the bar with nothing serious open, inside its rounds. No human owes it anything.</td></tr>
+            <tr><td><span class="verdict soft">soft-pass</span></td><td>The rounds ran out and an arbiter decided. There is a decision record waiting for you. <b>A run with a soft-pass is never reported as clean.</b></td></tr>
+            <tr><td><span class="verdict soft">partial</span></td><td><code>build</code> only: some slices shipped, some did not.</td></tr>
+            <tr><td><span class="verdict fail">hard-fail</span></td><td>The step could not produce a judgeable artifact, a checker could not judge it at all, or a red suite survived the last round. Everything downstream is skipped.</td></tr>
+            <tr><td><span class="verdict">skipped</span></td><td>A gate did not fire, an upstream step did not pass, or the budget ran low. The reason is printed.</td></tr>
+            <tr><td><span class="verdict">not-run</span></td><td>Never became ready — that means the graph edges are wrong, and it is a bug, not an outcome.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Why a slice was escalated</h3>
+      <p>These four reasons are deliberately distinct, and each names what the <em>last</em> attempt actually ended in. A slice that never compiled is never reported as a failing test suite.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Reason</th><th>What happened</th><th>What you do</th></tr></thead>
+          <tbody>
+            <tr><td><code>no-commit</code></td><td>The developer never reached a green commit.</td><td>Nothing to review — there is no branch. Read the defects and re-cut the slice smaller.</td></tr>
+            <tr><td><code>tester-red</code></td><td>It committed, and the suite stayed red.</td><td>The branch exists and is broken. The defects say how.</td></tr>
+            <tr><td><code>tester-silent</code></td><td>The tester never answered.</td><td>The slice is <em>unverified</em>, which is not the same as broken. Run the suite yourself.</td></tr>
+            <tr><td><code>unjudgeable</code></td><td>A checker reported it could not judge the slice at all.</td><td>Usually a missing seam or an ambiguous acceptance criterion. Read the checker's note.</td></tr>
+            <tr><td><code>arbiter-rejected</code></td><td>Tests were green but the arbiter judged the surviving craft findings too serious to accept.</td><td>The branch is real and passing. Decide the debt yourself.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>The human-verify file</h3>
+      <p><code>VERIFY-WITH-HUMAN.md</code> is append-only, and every arbiter decision leaves one index row and one record: the issue, the options, the decision, the rationale, the risk if it is wrong, what would change its mind, and the defects that were still open. Ids are namespaced per step so two concurrent arbiters cannot collide. This file is the run's real output for you — the branches are what it built, this is what it had to decide without you.</p>
+    </section>
+
+    <!-- ──────────────────────────────────────────── merge ── -->
+    <section id="merge">
+      <p class="eyebrow"><span class="dot">◆</span> Yours</p>
+      <h2>Merging</h2>
+      <p><b>sdlc2 never merges to your default branch and never moves it.</b> Reviewing and merging is the part it deliberately does not do.</p>
+      <ul>
+        <li>Merge in <b>slice order</b>. A slice with <code>Blocked by:</code> is cut from its blocker's branch, so merging it merges the blocker too. The report says which slices were stacked.</li>
+        <li>The shipped sha is the sha a tester passed. The arbiter is not allowed to commit, so nothing was touched between the green suite and the branch you are merging.</li>
+        <li>The paperwork is on <code>sdlc2/&lt;feature&gt;</code>, cut from your default branch, and <code>HEAD</code> is left there so the tree is clean and the next run is not blocked. If the report carries a <em>Paperwork not committed</em> section, that step failed and the artifacts are still untracked.</li>
+      </ul>
+    </section>
+
+    <!-- ─────────────────────────────────────── invariants ── -->
+    <section id="invariants">
+      <p class="eyebrow"><span class="dot">◆</span> Reference</p>
+      <h2>The rules that never bend</h2>
+      <ul>
+        <li><b>A red suite is not arbitrable.</b> No score, no deadline and no arbiter commits over it.</li>
+        <li><b>The arbiter never commits.</b> A green verdict from before the arbiter touched the branch is not evidence about the branch after.</li>
+        <li><b>Silence is never approval.</b> A missing verdict is a critical defect, and a checker that passes the work while filing a critical defect against it is resolved as a fail.</li>
+        <li><b>No back-edges.</b> A later step never re-opens an earlier one; disagreement becomes a human-verify row.</li>
+        <li><b>Every round is a new agent.</b> Nothing is continued or re-messaged, and no prompt carries a prior round's transcript, a prior maker's output, or another checker's verdict.</li>
+        <li><b>Prompts carry paths, not bodies.</b> Artifacts move between steps through disk; the engine holds only paths, scores and defects.</li>
+        <li><b>A defect without quoted evidence is discarded</b>, and the engine says how many it dropped.</li>
+        <li><b>The queue lives in <code>issues/</code>.</b> The <code>Blocked by:</code> lines are the single source of truth for branch topology; no downstream document may assert an edge they do not carry.</li>
+        <li><b>The default branch is never moved, merged into, rebased onto or pushed.</b></li>
+      </ul>
+    </section>
+
+    <!-- ────────────────────────────────────────── trouble ── -->
+    <section id="trouble">
+      <p class="eyebrow"><span class="dot">◆</span> Reference</p>
+      <h2>When it stops before it starts</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>It says</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Running a superseded engine</td><td>Restart Claude Code. Nothing else picks up the new plugin root — the run would otherwise succeed and report verdicts measured against the wrong engine.</td></tr>
+            <tr><td>The agents are not installed</td><td>Re-run the installer, then restart. Running the graph against globally-installed lookalikes from another harness would break sdlc2's independence, so it refuses instead.</td></tr>
+            <tr><td>No test command</td><td>Add <code>commands.test</code>. Without it the tester has no oracle and the build gate is theatre.</td></tr>
+            <tr><td>The baseline is red</td><td>Fix your suite first. Every tester verdict after a red baseline is meaningless.</td></tr>
+            <tr><td>The tree is dirty</td><td>Commit or stash. Slices commit, and stray changes would land inside them.</td></tr>
+            <tr><td>Leftover worktrees</td><td>They fail the clean-tree check and hold branches that cannot be checked out elsewhere. Release them; releasing never deletes the branch, because the branches are the deliverable.</td></tr>
+            <tr><td>Slices built sequentially</td><td>Not an error — you have no <code>commands.install</code>. One config line shortens every future run.</td></tr>
+            <tr><td>The <code>Workflow</code> tool is unavailable</td><td>Stop. There is no fallback engine in 0.1, and improvising one is not a supported path.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    sdlc2 0.1.9 · SPEC.md is the numbered contract · SETUP.md is the project-side checklist · <code>node verify.mjs</code> checks the engine's shape and its failure paths, not the quality of the software it builds.
+  </footer>
+
+</div>

@@ -75,7 +75,7 @@ the only configuration sdlc2 has.
 commands:
   test:    "./mvnw -q test"    # MANDATORY
   build:   ""                   # optional
-  install: ""                   # optional — unlocks parallel slice lanes
+  install: ""                   # optional — one of the two ways to open lanes (see 2b)
   run:     ""                   # optional
   e2e:     ""                   # optional
 seam:
@@ -331,10 +331,23 @@ Real, current, and worth knowing before you plan a feature.
    branch, leaving your tree clean. If the report carries a `## Paperwork not committed` section,
    that step failed and the artifacts are still untracked — read it, because a lost
    `VERIFY-WITH-HUMAN` record is unrecoverable. *(Fixed in v0.1.2.)*
-2b. **Parallel lanes need `commands.install`.** Without it, independent slices build one after
-   another. With it, they build concurrently in separate worktrees — which also means their test
-   suites run at the same time, so anything binding a **fixed port** will collide. Random-port
-   test setups are fine; a dev server pinned to 5173 is not.
+2b. **Lanes open when you say a fresh worktree is testable.** Two ways to say it: declare
+   `commands.install`, or deliberately declare `lanes: N > 1`. The second exists for Maven,
+   Gradle, Go and anything else that resolves from a shared cache and needs no install step —
+   those projects used to build strictly sequentially for having nothing to install. Nothing in
+   the engine verifies the claim (it spawns agents; it does not run commands), so prove it once by
+   hand: `git worktree add ../lane-probe HEAD`, run your test command in there, remove it.
+
+   With lanes open, independent slices build concurrently in separate worktrees — which also means
+   their test suites run **at the same time**, so anything binding a **fixed port** will collide.
+   Random-port test setups are fine; a dev server pinned to 5173 is not, and a Playwright
+   `webServer` with `reuseExistingServer: true` is worse than a collision — the second lane reuses
+   the first lane's server, tests the first lane's build, and **passes**.
+
+2c. **`lanes` is root-only.** It caps one scheduler that runs every slice whatever directory the
+   slice touches, so a per-directory value would have no coherent meaning. `commands` and `seam`
+   are per-slice facts and *are* merged from a nested `CLAUDE.md`; `lanes` is a run-wide fact and
+   is read from the root block only.
 3. **`commands.e2e` is never run by the engine.** It is printed into prompts and nothing more. Put
    E2E inside `commands.test` or accept that it is not a gate.
 4. **`hasUiStories` gates the whole `ux` node** on the product owner's judgement. If it decides a

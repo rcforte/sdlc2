@@ -205,6 +205,32 @@ sdlc2 shares **nothing** at runtime with any other harness.
   `(node, round, defects)`. This is the testable form of R-CTX-01..04.
 - `[R-CTX-06]` **MUST**: makers return a changelog of ≤ 20 lines plus paths — never a body.
 
+## 6b. Labels and progress groups
+
+What a watching human sees while a run is going, and — less obviously — an interface the
+conformance harness depends on.
+
+- `[R-LABEL-01]` **MUST**: every spawn label is produced by the single constructor `labelFor`, and
+  no call site builds one by hand. Labels are not decoration: `verify.mjs` routes its stubbed
+  agents by reading them, so a label typed at a call site is an undeclared interface. Renaming one
+  makes a stub fall through and the engine record a silent agent — which is loud in a test that
+  asserts a green run, and **silent in a test that asserts a failure path**, where the run still
+  fails and nothing says it failed for the wrong reason. Enforced twice: a source check that every
+  `label:` is a `labelFor(` call, and a behavioural check that `parseLabel(labelFor(...))`
+  round-trips for every role.
+- `[R-LABEL-02]` **MUST**: a label names a **role** and nothing else; the **unit** of work — which
+  slice, which node — is carried by the progress group via `groupFor`. Stating the unit once in a
+  group heading beats repeating it on every row, and it is what makes three rows legible as one
+  slice's work. Roles are persona names (`developer`, `tester`, `code-reviewer`,
+  `product-owner-critic`, …) or, for the inline helper calls that have no persona,
+  `resolve-slices` · `release-worktrees` · `escalate` · `arbiter` · `report`. An activity name is a
+  violation: `test:` read as a step in the developer's TDD cycle, which it never was — test-first
+  happens inside the developer's own call, and that agent is the independent tester judging
+  finished work.
+- `[R-LABEL-03]` **MUST**: `architect` and `ux` share a phase, so a group is `<phase> · <unit>`.
+  Without the unit their four rows interleave in one box, out of order, because the two nodes run
+  concurrently — and every slice's rows land in a single flat `Build` box.
+
 ## 7. Models
 
 - `[R-MODEL-01]` **MUST**: every maker, checker and arbiter declares its own `model` and `effort`
@@ -309,6 +335,34 @@ other slice's branch is. A violation is a critical `slice-branch-base` defect. T
 that it branched correctly is not evidence, and the instruction alone is not enforcement: on the
 first real run the developer stacked all four independent slices anyway, and the reviewer scored a
 diff containing three earlier slices' code at 0.86 without noticing.
+`[R-BUILD-04b]` **MUST**: the queue the run builds is the queue `issues/` declares, and something
+that is not the engine has to say so. `slices` is a **required** field of the `po` maker's schema
+and `blockedBy` is a **required** field of each entry, so a run can no longer proceed on a graph
+nobody stated: an absent manifest used to fall through to an agent re-deriving the queue with no
+checker over it, and an absent `blockedBy` used to level every slice at 0, cut every branch from
+the default branch, and dissolve the stacking invariant in silence. The **tester** then reads its
+own issue file's `## Blocked by` section and compares it with the blockers the engine handed it; a
+difference is a critical `slice-graph-mismatch` defect. This is separate from `[R-BUILD-04a]` and
+must run **before** it, because `mustContain` and `mustNotContain` are derived from the same list
+being checked — proving the branch against them confirms only that the branch matches the graph
+the tester was given, never that the graph is the one the issues declare. Run 5's `due-date`
+measured the gap: the resolver declared `04-change-due-date` blocked by `02` **and** `03` where
+the issue named only `02`, so the slice was cut from `03`'s branch, carried code it does not own,
+and every check passed.
+
+`[R-BUILD-04c]` **MUST**: lanes open when the **project** says a fresh worktree is testable, and
+the project may say so two ways — by declaring `commands.install`, or by deliberately declaring
+`lanes: N > 1`. The old gate asked only the first, which is a *proxy* for the real question and
+false for a whole ecosystem: Maven and Gradle resolve from a shared cache, so a JVM project
+genuinely needs no install step and was serialised for having nothing to install, silently losing
+`[E2-14]` and `[SD-04]`'s worktree isolation on every run. The engine **MUST NOT** probe: it
+spawns agents, it does not run commands, so probing means a full test-suite run in the pre-checks
+on every run forever. The pre-checks ask the human to try one worktree by hand instead, once per
+project. Whichever path is taken **MUST** be logged, and the consent path **MUST** say that
+nothing verified it — a slice failing on missing dependencies otherwise reads as a slice with a
+bug. `lanes` is **root-only**: it caps one scheduler that runs every slice regardless of
+directory, so `configFor` rightly merges `commands` and `seam` per directory and not this.
+
 `[R-BUILD-05]` **MUST**: the developer drives sdlc2's own `skills/outside-in-tdd`.
 `[R-BUILD-06]` **MUST NOT**: move, merge into, rebase onto, or push the default branch. sdlc2
 never merges. `[R-BUILD-07]` **MUST**: the developer, the tester and the code-reviewer of one
@@ -380,6 +434,17 @@ checking anything out.
   criterion low, and those say opposite things about how hard the checkers are pushing. A criterion
   no checker scored is reported as a **gap**, never as a zero: it already counts as zero in the
   total, and printing it as a low mark hides that nobody judged it.
+- `[R-REP-09]` **MUST**: the report says **what to merge**, not merely what was built. A stacked
+  slice's branch already contains its blockers' — `baseFor` cuts it from the last of them and the
+  tester proves the rest are ancestors — so the branches a human has to merge are the **leaves of
+  the shipped dependency graph**, and there are usually fewer of them than there are slices. Run
+  5's `due-date` shipped six slices whose real cost was two merges; the report listed six branches
+  and left the reader to derive that from the `Waits for` column, or to merge six by hand and meet
+  "already up to date" four times. The engine computes the plan (`mergePlan`) rather than leaving
+  the report agent to derive it, for the same reason `[R-REP-07]`'s veto tally is computed: a
+  number nobody can recompute from the report is a number the run did not measure. Leaves are
+  taken over the **shipped** subgraph only — a slice whose blocker escalated was skipped, so every
+  shipped slice's blockers shipped too.
 - `[R-BUILD-07]` **MUST**: a slice's id is `NN-slug`, recovered from its issue **filename** when
   the product owner's manifest supplies something else, and every `Blocked by:` reference is
   rewritten in the same pass. The id becomes a git branch name, and only the fallback resolver was
