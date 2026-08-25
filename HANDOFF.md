@@ -8,37 +8,56 @@
 
 ## Do this first
 
-**Run 5 is RUNNING on 0.1.8** — feature `undo-a-removal`, seed grilled in the lab session, chosen
-for slices of visibly uneven length so the removed level barrier (E2-14) has something to show.
-The restart landed and the run is in flight. **Read its report when it returns**, then do the
-human-verify pass and the merges; sdlc2 never merges.
+**Run 5 is done, merged, and closed out.** Feature `undo-a-removal`, 3 slices, all merged to lab
+`main`, suite green (151 tests), report header `Engine: sdlc2 0.1.8` — **SD-03 holds for the third
+time**, and `git worktree list` ended clean, so **SD-04 holds again**. Three of its four
+human-verify records are resolved; VH-02, the screen-reader pass, is not.
 
-**Do not push, tag, or `claude plugin update` until run 5 finishes.** A running session reads the
-install cache, so writing to the cache mid-run swaps the engine underneath it. Editing this repo is
-free — the run cannot see it.
+**Next, in this order:**
 
-| gate | state |
-|---|---|
-| run 5 | **in flight** on 0.1.8 — do not touch the install cache |
-| plugin repo | **0.1.9 in preparation**: `R-REP-07` committed at `b40c8e1`, deliberately **untagged and unpushed** until run 5 lands |
-| installed plugin | **0.1.8 at `1f02a9c`** — the engine run 5 is executing |
-| lab repo | run 5 is writing to it; hands off until it returns |
-| checks | `node verify.mjs` → **383**, was 372 |
+| # | do | state |
+|---|---|---|
+| 1 | build 0.1.9 | **DONE** — `R-REP-08`, `R-BUILD-07`, SD-12's field, at `b037638`. 402 checks, was 372 |
+| 2 | move the findings log, file SD-10…SD-13, close SD-05 | **DONE** — the log now lives in this repo at `harness-findings.md` |
+| 3 | tag `v0.1.9`, push, `claude plugin update sdlc2@sdlc2-marketplace` | **TODO** |
+| 4 | restart | **TODO** — a session pins its plugin root at start (SD-03) |
+| 5 | one screen-reader pass on the merged lab app, closing all six open a11y records | **TODO** — see SD-13 |
+| 6 | write down the run 6 prediction before running it | **TODO** |
+| 7 | grill the seed in a **db-rooted** session, then run 6 | **TODO** |
 
-**0.1.9 so far: `[R-REP-07]`, the veto round.** A round that scored at or above its bar and was
-stopped by an open defect anyway now says so — in the log as it happens, and as a tally the report
-prints even when it reads zero. This is the item the handoff kept listing as "no data after four
-runs": the veto was never silent, it was unrecorded, and a score plus a round count cannot tell a
-round stopped by severity from one that simply scored badly. Zero and unmeasured call for opposite
-decisions about whether the veto is worth its rubber-stamping risk, and until now the report could
-not distinguish them. Proven by P17b/P17c against both mutants — dropping the flag fails four
-checks, and a flag that ignores the score fails the negative case. **Not yet run**, which is the
-seventh release in a row to be able to say that.
+**Run 6 targets `~/dev/code/db`, not the lab.** Java 21 + Gradle, three modules. The reason is
+SD-10: the lab's maturity and the engine's improvement explain the one-round-pass trend equally
+well, and no sixth run on the same codebase can separate them. It also tests the stack-agnostic
+claim (`E2-02`) for the first time — five runs, one stack.
 
-**Still open for 0.1.9, and neither needs a run:** the second half of SD-09 (stamp the commit sha
-into the plugin at release, so a report names its *build* and not just its version), and closing
-**SD-05** as proven-by-probe (P18b) in the lab's `docs/harness-findings.md` — that edit is blocked
-only by run 5 owning the lab repo right now.
+**Seed for run 6: "the three statements the MVP is missing — column projection, DELETE, and
+UPDATE."** All three build on WHERE filtering, which shipped in spec 0003, and **none blocks
+another** — which is what run 5 could not produce and what `E2-14` needs. Weights differ visibly:
+DELETE is lightest, projection touches the planner, UPDATE has to choose between in-place rewrite
+and delete-and-reinsert. db has no UI at all, so it is also the first real exercise of the ux gate.
+`docs/features/` already holds a human-written Planned brief for each, so the po node's framing can
+be read against one.
+
+**`db/CLAUDE.md` is being left exactly as it is, deliberately.** It mandates a competing
+methodology — grill with `/grill-with-docs`, nine-section specs at `specs/NNNN`, `/outside-in-tdd`,
+`/improve-codebase-architecture` before commit, `/caveman` responses — and names four skills sdlc2
+is forbidden by `R-IND-01..04` to invoke. Its definition of done cannot be satisfied by sdlc2 at
+all. Every subagent will load it. **No outcome of that collision is wasted:** if the personas cope,
+the stack claim holds and sdlc2 survives an opinionated host; if the run derails, that is the most
+valuable finding available and one no probe could produce. Write the prediction first (step 6) —
+my own is that the definition of done is the sharpest collision, and whichever instruction source
+the developer obeys tells you which one wins.
+
+**0.1.9's theme is: the run can be read.** Four items, all observability — the veto tally
+(`R-REP-07`), the per-criterion margins (`R-REP-08`), slice ids that name their branch
+(`R-BUILD-07`), and a release step that reports what it actually did (SD-12). Only the third
+changes engine behaviour, and its probe is driven against run 5's real manifest shape.
+
+**SD-09 is CLOSED.** The sha stamp is dropped, not deferred: `R-PKG-07` catches the fault where it
+is made, the engine is sandboxed and cannot read a clock or a filesystem, the install cache is not
+a git checkout, and a file written at release time would name its own parent commit. VERSION plus
+`R-PKG-07` already identifies the build, because no runtime-read file may move after the tag
+without failing verify.
 
 **SD-09 — two engines can both call themselves 0.1.6, and pre-check 0 cannot tell.** Run 4's own
 fix (`[R-REP-06]`, `9966578`) was pushed with `VERSION` left at `0.1.6`, so the repo and the
