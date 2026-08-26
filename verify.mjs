@@ -297,6 +297,7 @@ const EXPORTS = [
   'baseFor', 'developerPrompt', 'testerPrompt', 'reviewerPrompt', 'spawn', 'SPAWN_RETRIES',
   'predecessorsOf', 'blocksSuccessors', 'results', 'state', 'assertArgs', 'settle',
   'planLines', 'sliceTableLines', 'upstreamDisputes', 'criterionLows', 'canonicalSliceIds',
+  'labelFor', 'parseLabel', 'roleOf', 'groupFor', 'mergePlan',
 ]
 const ARGS = {
   feature: 'demo', title: 'Demo', runId: 'nf-test', defaultBranch: 'main',
@@ -451,7 +452,15 @@ check(/Math\.min\.apply/.test(src) && !/scored\.reduce/.test(src), 'step score i
 // for anything running beside a sibling.
 check(/async function runSlice\(slice, wt\)/.test(src), 'one slice is built by one callable unit  [R-BUILD-04]')
 check(/levelOf\[sl\.id\] = lv/.test(src), 'slices are scheduled by dependency LEVEL, not in a flat line  [R-BUILD-04]')
-check(/const LANES = install \? MAX_LANES : 1/.test(src), 'lanes open only when the project declares an install command  [R-BUILD-04]')
+// [R-BUILD-04c] This check used to assert `LANES = install ? MAX_LANES : 1`. That rule was the bug:
+// an install command is a PROXY for "a fresh worktree is testable", and it is false for every JVM
+// project, which resolves from a shared cache and needs no install step. The check now asserts the
+// question actually being asked — did the project say yes, either way — and that both answers are
+// logged, since the consent path is a claim nothing in the engine can verify.
+check(/const LANES = install \? MAX_LANES : byConsent \? declaredLanes : 1/.test(src), 'lanes open when the project says a fresh worktree is testable — by an install command OR by declaring lanes  [R-BUILD-04c]')
+check(/const byConsent = !install && declaredLanes > 1/.test(src), 'a deliberately declared `lanes: N > 1` is that answer on its own  [R-BUILD-04c]')
+check(/nothing here verifies it/.test(src), 'and the consent path says out loud that nothing checked it  [R-BUILD-04c]')
+check(/Declare either one to open lanes/.test(src), 'while the sequential path names both ways out  [R-BUILD-04c]')
 check(/const declaredLanes = Math\.floor\(Number\(CONFIG\.lanes\)\)/.test(src), 'and how many lanes is the project\'s to declare, not a literal  [E2-10]')
 check(/await Promise\.race\(Object\.keys\(running\)/.test(src), 'the scheduler waits on the FIRST slice to land, not on a whole level  [E2-14]')
 check(!/for \(let lv = 0; lv < levels\.length; lv\+\+\)/.test(src), 'and no level barrier survives  [E2-14]')
@@ -477,9 +486,11 @@ check(/Engine path: \$\{ROOT\}/.test(src), 'with the plugin root it actually ran
 // [SD-08 / R-REP-05] The scheduler knew whether lanes fired and told only the live log. The report
 // is the artifact that outlives the run, so it has to carry it too — asserted at every hop, because
 // a break anywhere in the chain leaves the report silent in exactly the way run 3's was.
-check(/const lanes = \{ lanes: LANES, install: install \|\| null, widest: widest/.test(src), 'the scheduler records how it scheduled  [R-REP-05]')
+check(/const lanes = \{ lanes: LANES, install: install \|\| null, opened: /.test(src), 'the scheduler records how it scheduled  [R-REP-05]')
+check(/opened: install \? 'install' : byConsent \? 'declared-lanes' : null/.test(src), 'including WHICH answer opened the lanes, so a report can say which  [R-BUILD-04c]')
 check(/lanes\.batches\.push\(\{ level: levelOf\[sl\.id\], ids: \[sl\.id\], concurrent: withOthers \}\)/.test(src), 'every slice start is recorded with whether it shared the clock  [R-REP-05 / E2-14]')
-check(/rows: rows, lanes: lanes, amendments: amendments \}/.test(src), 'the build node carries the lane record out with its rows  [R-REP-05]')
+check(/rows: rows, lanes: lanes, amendments: amendments\b/.test(src), 'the build node carries the lane record out with its rows  [R-REP-05]')
+check(/merge: mergePlan\(shipped\.map\(/.test(src), 'and the merge plan, computed from what actually shipped  [R-REP-09]')
 check(/Amendments: \$\{JSON\.stringify\(build\.amendments/.test(src), 'and the report prompt is handed the amendments  [E2-13]')
 check(/ACCEPTANCE CRITERIA THAT COULD NOT BE MET/.test(src), 'which it must state in its own section  [E2-13]')
 check(/Lanes\.release/.test(src), 'and whether the worktrees were actually released  [E2-08]')
@@ -506,8 +517,15 @@ check(/git merge-base --is-ancestor/.test(src), 'the tester proves the slice bra
 group('engine — behaviour under agent failure')
 
 const parallelReal = async (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
-const isMake = (o) => (o.label || '').includes(':make')
-const isArb = (o) => (o.label || '').includes('arbiter')
+// [R-LABEL-01] Stubs route on the ROLE the engine's own parser reports, and on the UNIT carried by
+// the progress group — never on an ad-hoc string prefix. The parser is borrowed from the engine so
+// there is no second implementation to drift from the constructor.
+const PARSE = engine({}).parseLabel
+const role = (o) => PARSE(o && o.label).role
+const unit = (o) => String((o && o.phase) || '').split(' \u00b7 ')[1] || ''
+const DOC_MAKERS = new Set(['product-owner', 'architect', 'ux-design'])
+const isMake = (o) => DOC_MAKERS.has(role(o))
+const isArb = (o) => role(o) === 'arbiter'
 const scoreAll = (rubric, s) => ({ criteria: rubric.criteria.map((c) => ({ id: c.id, score: s })), defects: [] })
 
 async function probe(name, fn) {
@@ -584,10 +602,10 @@ await probe('developer vanishes', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
-      if (L.startsWith('build:')) { built++; return built === 1 ? { committed: true, sha: 'abc123', branch: 'slice/demo/01-a' } : null }
-      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
-      if (L.startsWith('review:')) return { criteria: [{ id: 'CR-CLEAN', score: 0.2 }], defects: [{ criterion: 'CR-CLEAN', severity: 'medium', location: 'F.java:3', evidence: 'q', fix: 'f' }] }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
+      if (role(o) === 'developer') { built++; return built === 1 ? { committed: true, sha: 'abc123', branch: 'slice/demo/01-a' } : null }
+      if (role(o) === 'tester') return { pass: true, criteria: [], defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: [{ id: 'CR-CLEAN', score: 0.2 }], defects: [{ criterion: 'CR-CLEAN', severity: 'medium', location: 'F.java:3', evidence: 'q', fix: 'f' }] }
       return {}
     },
   })
@@ -608,9 +626,9 @@ await probe('never commits', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
-      if (L.startsWith('build:')) return { committed: false, notes: 'compile error' }
-      if (L.startsWith('escalate:')) { note = p; return {} }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
+      if (role(o) === 'developer') return { committed: false, notes: 'compile error' }
+      if (role(o) === 'escalate') { note = p; return {} }
       return {}
     },
   })
@@ -626,11 +644,11 @@ await probe('tester red', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'a1', branch: 'slice/demo/01-a' }
-      if (L.startsWith('test:')) return { pass: false, criteria: [], defects: [{ criterion: 'CR-TEST', severity: 'critical', location: 'T.java:9', evidence: 'expected 2 got 1', fix: 'fix it' }] }
-      if (L.startsWith('review:')) return scoreAll(E.RUBRICS.build, 1)
-      if (L.startsWith('arbiter:')) { arbiters++; return { finalized: true, records: [] } }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
+      if (role(o) === 'developer') return { committed: true, sha: 'a1', branch: 'slice/demo/01-a' }
+      if (role(o) === 'tester') return { pass: false, criteria: [], defects: [{ criterion: 'CR-TEST', severity: 'critical', location: 'T.java:9', evidence: 'expected 2 got 1', fix: 'fix it' }] }
+      if (role(o) === 'code-reviewer') return scoreAll(E.RUBRICS.build, 1)
+      if (role(o) === 'arbiter') { arbiters++; return { finalized: true, records: [] } }
       return {}
     },
   })
@@ -646,9 +664,9 @@ await probe('silent build checker', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
-      if (L.startsWith('build:')) { prompts.push(/first build of this slice/.test(p) ? 'FIRST' : 'REPAIR'); return { committed: true, sha: 'a1', branch: 'b' } }
-      if (L.startsWith('test:') || L.startsWith('review:')) throw new Error('checker died')
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] }] }
+      if (role(o) === 'developer') { prompts.push(/first build of this slice/.test(p) ? 'FIRST' : 'REPAIR'); return { committed: true, sha: 'a1', branch: 'b' } }
+      if (role(o) === 'tester' || role(o) === 'code-reviewer') throw new Error('checker died')
       return {}
     },
   })
@@ -680,8 +698,8 @@ await probe('unknown blocker', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] }] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'x', branch: 'b' }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] }] }
+      if (role(o) === 'developer') return { committed: true, sha: 'x', branch: 'b' }
       return {}
     },
   })
@@ -698,10 +716,10 @@ await probe('node crash', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L === 'report') { reported = true; return {} }
-      if (isMake(o) && L.startsWith('po')) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
-      if (L.startsWith('po:')) return scoreAll(E.RUBRICS.po, 1)
-      if (L.startsWith('architect')) throw new Error('architect died')
+      if (role(o) === 'report') { reported = true; return {} }
+      if ((isMake(o) && unit(o) === 'po')) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
+      if (role(o) === 'product-owner-critic') return scoreAll(E.RUBRICS.po, 1)
+      if (unit(o) === 'architect') throw new Error('architect died')
       return {}
     },
   })
@@ -723,9 +741,9 @@ await probe('SD-03 engine identity', async () => {
     args: Object.assign({}, ARGS, extraArgs),
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L === 'report') { reportPrompt = p; return {} }
-      if (isMake(o) && L.startsWith('po')) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
-      if (L.startsWith('po:')) return scoreAll(E.RUBRICS.po, 1)
+      if (role(o) === 'report') { reportPrompt = p; return {} }
+      if ((isMake(o) && unit(o) === 'po')) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false }
+      if (role(o) === 'product-owner-critic') return scoreAll(E.RUBRICS.po, 1)
       return {}
     },
   })
@@ -765,10 +783,10 @@ await probe('ux gate', async () => {
     agent: async (p, o) => {
       const L = o.label || ''
       seen.push(L)
-      if (L.startsWith('slices:resolve')) return { slices: [] }
+      if (role(o) === 'resolve-slices') return { slices: [] }
       if (isMake(o)) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }, { path: '.sdlc2/features/demo/design.md' }], hasUiStories: false }
       if (isArb(o)) return { finalized: true, records: [] }
-      return scoreAll(L.startsWith('architect') ? E.RUBRICS.arch : E.RUBRICS.po, 1)
+      return scoreAll(unit(o) === 'architect' ? E.RUBRICS.arch : E.RUBRICS.po, 1)
     },
   })
   await E.walk()
@@ -784,7 +802,7 @@ await probe('po hard-fail', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L === 'report') { reported = true; return {} }
+      if (role(o) === 'report') { reported = true; return {} }
       if (isMake(o)) return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: true }
       return { criteria: [], defects: [], hard: true }
     },
@@ -817,20 +835,21 @@ await probe('slice branch bases', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      said.push({ label: L, prompt: p })
-      if (L.startsWith('slices:resolve')) return { slices: [
+      said.push({ role: role(o), unit: unit(o), prompt: p })
+      if (role(o) === 'resolve-slices') return { slices: [
         { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] },
         { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] },
         { id: '03-c', path: 'issues/03-c.md', title: 'C', dir: '', blockedBy: [] },
       ] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
-      if (L.startsWith('test:')) return { pass: true, defects: [] }
-      if (L.startsWith('review:')) return scoreAll(E.RUBRICS.build, 1)
+      if (role(o) === 'developer') return { committed: true, sha: 'cafe', branch: `slice/demo/${unit(o)}`, changelog: 'x' }
+      if (role(o) === 'tester') return { pass: true, defects: [] }
+      if (role(o) === 'code-reviewer') return scoreAll(E.RUBRICS.build, 1)
       return {}
     },
   })
   const r = await E.buildSlices(E.NODES.build)
-  const of = (pre, id) => (said.find((s) => s.label.startsWith(`${pre}:${id}`)) || {}).prompt || ''
+  const OF_ROLE = { build: 'developer', test: 'tester', review: 'code-reviewer' }
+  const of = (pre, id) => (said.find((s) => s.role === (OF_ROLE[pre] || pre) && s.unit === id) || {}).prompt || ''
 
   check(r.slices.shipped.length === 3, `all three slices ship in this probe (got ${r.slices.shipped.length})`)
   check(/off 'main'/.test(of('build', '01-a')), 'an independent slice is cut from the default branch  [R-BUILD-04]')
@@ -985,9 +1004,9 @@ await probe('R-REP-07 the veto tally reaches the report', async () => {
       args: ARGS,
       agent: async (p, o) => {
         const L = o.label || ''
-        if (L === 'report') { reportPrompt = p; return {} }
-        if (isMake(o) && L.startsWith('po')) { poRound++; return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false } }
-        if (L.startsWith('po:')) return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 1 })), defects: poRound === 1 && defectsInRound1 ? [critical] : [] }
+        if (role(o) === 'report') { reportPrompt = p; return {} }
+        if ((isMake(o) && unit(o) === 'po')) { poRound++; return { ok: true, artifacts: [{ path: '.sdlc2/features/demo/feature.md' }, { path: '.sdlc2/features/demo/mockup.html' }], hasUiStories: false } }
+        if (role(o) === 'product-owner-critic') return { pass: true, criteria: E.RUBRICS.po.criteria.map((c) => ({ id: c.id, score: 1 })), defects: poRound === 1 && defectsInRound1 ? [critical] : [] }
         return {}
       },
     })
@@ -1057,10 +1076,10 @@ await probe('SD-11 slice ids name their branch, edges intact', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      said.push({ label: L, prompt: p })
-      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
-      if (L.startsWith('test:')) return { pass: true, defects: [] }
-      if (L.startsWith('review:')) return scoreAll(E.RUBRICS.build, 1)
+      said.push({ role: role(o), unit: unit(o), prompt: p })
+      if (role(o) === 'developer') return { committed: true, sha: 'cafe', branch: `slice/demo/${unit(o)}`, changelog: 'x' }
+      if (role(o) === 'tester') return { pass: true, defects: [] }
+      if (role(o) === 'code-reviewer') return scoreAll(E.RUBRICS.build, 1)
       return {}
     },
   })
@@ -1071,7 +1090,7 @@ await probe('SD-11 slice ids name their branch, edges intact', async () => {
   const two = row('02-the-offer-ends-when-the-list-moves')
   check(two && two.base === 'slice/demo/01-bring-back-the-last-removed-name',
     `and a blocked slice is still cut from its blocker after the rename (base '${two && two.base}')  [SD-11 / R-BUILD-04]`)
-  check(said.some((x) => x.label.startsWith('slices:resolve')) === false, 'the po manifest fast path is the one under test  [E-13]')
+  check(said.some((x) => x.role === 'resolve-slices') === false, 'the po manifest fast path is the one under test  [E-13]')
 })
 
 // P17e — [R-REP-08] The per-criterion margin survives a first-round pass. `scoreBrief` assembles
@@ -1158,10 +1177,10 @@ await probe('E2-06 hasUiStories is enforced', async () => {
     args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test' }, seam: {} }, configByDir: {} },
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: true }] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'a1', branch: 'slice/demo/01-a' }
-      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
-      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: true }] }
+      if (role(o) === 'developer') return { committed: true, sha: 'a1', branch: 'slice/demo/01-a' }
+      if (role(o) === 'tester') return { pass: true, criteria: [], defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
       return {}
     },
   })
@@ -1246,14 +1265,14 @@ await probe('E2-08 the release is read', async () => {
     args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test', install: 'npm ci' }, seam: {} }, configByDir: {} },
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [
+      if (role(o) === 'resolve-slices') return { slices: [
         { id: '01-a', path: 'i/01.md', title: 'A', dir: '', blockedBy: [] },
         { id: '02-b', path: 'i/02.md', title: 'B', dir: '', blockedBy: [] },
       ] }
-      if (L === 'worktrees:release') { asked = { prompt: p, schema: o.schema }; return { released: false, remaining: ['../.sdlc2-worktrees/demo-r/02-b'], branches: true } }
-      if (L.startsWith('build:')) return { committed: true, sha: 'a1', branch: 'slice/demo/x' }
-      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
-      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      if (role(o) === 'release-worktrees') { asked = { prompt: p, schema: o.schema }; return { released: false, remaining: ['../.sdlc2-worktrees/demo-r/02-b'], branches: true } }
+      if (role(o) === 'developer') return { committed: true, sha: 'a1', branch: 'slice/demo/x' }
+      if (role(o) === 'tester') return { pass: true, criteria: [], defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
       return {}
     },
   })
@@ -1285,21 +1304,21 @@ await probe('E2-14 per-slice readiness', async () => {
     },
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) {
+      if (role(o) === 'resolve-slices') {
         return { slices: [
           { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [] },
           { id: '03-slow', path: 'issues/03-slow.md', title: 'Slow', dir: '', blockedBy: [] },
           { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] },
         ] }
       }
-      if (L.startsWith('build:02-b')) { bStarted = true; openGate() }
-      if (L.startsWith('build:03-slow')) {
+      if ((role(o) === 'developer' && unit(o) === '02-b')) { bStarted = true; openGate() }
+      if ((role(o) === 'developer' && unit(o) === '03-slow')) {
         await Promise.race([gate, fallback])
         bStartedBeforeSlowFinished = bStarted
       }
-      if (L.startsWith('build:')) return { committed: true, sha: 'a1b2c3', branch: 'slice/demo/x' }
-      if (L.startsWith('test:')) return { pass: true, criteria: [], defects: [] }
-      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+      if (role(o) === 'developer') return { committed: true, sha: 'a1b2c3', branch: 'slice/demo/x' }
+      if (role(o) === 'tester') return { pass: true, criteria: [], defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
       return {}
     },
   })
@@ -1400,8 +1419,8 @@ await probe('SD-05 transport retry', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      said.push({ label: L, prompt: p })
-      if (L.startsWith('po:make')) return null
+      said.push({ role: role(o), unit: unit(o), prompt: p })
+      if ((isMake(o) && unit(o) === 'po')) return null
       return {}
     },
   })
@@ -1410,7 +1429,7 @@ await probe('SD-05 transport retry', async () => {
   check(errored.length > 0, 'an unanswered maker is recorded as errored  [R-LOOP-11]')
   check(errored.every((h) => h.note === 'maker spawn errored'), 'and never as "maker output rejected"  [R-LOOP-11]')
   check(!(r.history || []).some((h) => h.note === 'maker output rejected'), 'the two are not conflated  [R-LOOP-11]')
-  const makes = said.filter((x) => x.label.startsWith('po:make'))
+  const makes = said.filter((x) => x.role === 'product-owner')
   check(makes.length === E4.NODES.po.rounds * (E4.SPAWN_RETRIES + 1), `each round retried once before being charged (${makes.length} spawns for ${E4.NODES.po.rounds} rounds)  [R-LOOP-11]`)
   const second = (makes[2] || {}).prompt || ''
   check(!/Fix EVERY defect/.test(second), 'and the next maker is not asked to repair its own non-answer  [R-LOOP-08]')
@@ -1419,6 +1438,155 @@ await probe('SD-05 transport retry', async () => {
 
 // P18c — [SD-07 / R-ARCH-03] issues/ owns the dependency queue. The architect may disagree with
 // it; it may not declare a different one downstream, where only one of the two graphs is read.
+await probe('R-REP-09 the report says what to merge, not just what was built', async () => {
+  const E = engine({})
+  // The real run-5 graph: 01 <- 02 <- {03, 04}; 03 <- 06; 04 <- 05. Six slices, two tips.
+  const slices = [
+    { id: '01', blockedBy: [] }, { id: '02', blockedBy: ['01'] }, { id: '03', blockedBy: ['02'] },
+    { id: '04', blockedBy: ['02'] }, { id: '05', blockedBy: ['04'] }, { id: '06', blockedBy: ['03'] },
+  ]
+  const lv = { '01': 0, '02': 1, '03': 2, '04': 2, '05': 3, '06': 3 }
+  const all = E.mergePlan(['01', '02', '03', '04', '05', '06'], slices, lv)
+  check(all.leaves.join(',') === '05,06',
+    'six shipped slices in a two-wide graph are two merges, not six  [R-REP-09]')
+  const brings = Object.create(null)
+  for (const c of all.carries) brings[c.id] = c.brings.join(',')
+  check(brings['06'] === '01,02,03' && brings['05'] === '01,02,04',
+    'and each leaf names the whole chain it brings with it  [R-REP-09]')
+
+  const part = E.mergePlan(['01', '02', '03', '06'], slices, lv)
+  check(part.leaves.join(',') === '06',
+    'leaves are taken over what SHIPPED, so an escalated branch is never proposed for merging  [R-REP-09]')
+
+  const flat = E.mergePlan(['01', '02'], [{ id: '01', blockedBy: [] }, { id: '02', blockedBy: [] }], { '01': 0, '02': 0 })
+  check(flat.leaves.join(',') === '01,02',
+    'independent slices are all leaves — nothing is hidden behind another  [R-REP-09]')
+  check(E.mergePlan([], slices, lv).leaves.length === 0,
+    'and a run that shipped nothing proposes no merges  [R-REP-09]')
+
+  // Defensive: a shipped slice whose blocker did NOT ship should be unreachable — runSlice skips a
+  // slice whose blocker failed — but if it ever happens, `carries` must not promise a human that
+  // merging this branch brings code that was never built.
+  const orphan = E.mergePlan(['01', '06'], slices, lv)
+  check((orphan.carries.find((c) => c.id === '06') || {}).brings.length === 0,
+    'a leaf never claims to bring a branch that did not ship  [R-REP-09]')
+
+  check(/Merge plan: \$\{JSON\.stringify\(build\.merge/.test(src), 'the plan reaches the report node as data  [R-REP-09]')
+  check(/WHAT TO MERGE/.test(src) && /never omitted\\n` \+\n\s*`when anything shipped/.test(src),
+    'and the report is told to print it whenever anything shipped  [R-REP-09]')
+})
+
+await probe('R-BUILD-04c lanes open on the project\'s word, not on an install command', async () => {
+  // A JVM-shaped project: a real test command, NO install step, and lanes declared deliberately.
+  const cfg = (lanes) => ({ feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main',
+    config: { commands: { test: 'mvn -B verify' }, lanes: lanes, seam: {} }, configByDir: {} })
+  const run = async (lanes) => {
+    const said = []
+    const logs = []
+    let E
+    E = engine({
+      parallel: parallelReal,
+      args: cfg(lanes),
+      log: (m) => logs.push(String(m)),
+      agent: async (p, o) => {
+        said.push({ role: role(o), unit: unit(o), prompt: p })
+        if (role(o) === 'resolve-slices') return { slices: [
+          { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: false },
+          { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: [], ui: false },
+        ] }
+        if (role(o) === 'developer') return { committed: true, sha: 'a1', branch: `slice/demo/${unit(o)}` }
+        if (role(o) === 'tester') return { pass: true, criteria: [], defects: [] }
+        if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 1 })), defects: [] }
+        return {}
+      },
+    })
+    const r = await E.buildSlices(E.NODES.build)
+    const dev = (id) => (said.find((x) => x.role === 'developer' && x.unit === id) || {}).prompt || ''
+    return { r: r, logs: logs.join('\n'), dev: dev }
+  }
+
+  const opened = await run(2)
+  check(opened.r.slices.lanes.lanes === 2,
+    'a JVM-shaped project with no install command still gets its declared lanes  [R-BUILD-04c]')
+  check(opened.r.slices.lanes.opened === 'declared-lanes',
+    'and the run records that consent, not an install command, is what opened them  [R-BUILD-04c]')
+  check(/git worktree add/.test(opened.dev('01-a')) && /git worktree add/.test(opened.dev('02-b')),
+    'so each concurrent slice still gets its own worktree  [SD-04]')
+  check(/nothing here verifies it/.test(opened.logs),
+    'and the log says the project asserted it and nothing checked  [R-BUILD-04c]')
+
+  const closed = await run(1)
+  check(closed.r.slices.lanes.lanes === 1 && closed.r.slices.lanes.opened === null,
+    'a project that declares neither still builds sequentially  [R-BUILD-04c]')
+  check(/Declare either one to open lanes/.test(closed.logs),
+    'and is told both ways to open them  [R-BUILD-04c]')
+  check(!/git worktree add/.test(closed.dev('01-a')),
+    'and stays in the session checkout  [R-BUILD-07]')
+})
+
+await probe('R-LABEL-01 one constructor for every label', async () => {
+  const E = engine({})
+
+  const built = src.match(/\blabel:\s*([^,\n}]+)/g) || []
+  const byHand = built.filter((m) => !/label:\s*labelFor\(/.test(m))
+  check(built.length > 0 && byHand.length === 0,
+    `every spawn label comes from the constructor (${built.length} sites${byHand.length ? ', by hand: ' + byHand.join(' | ') : ''})  [R-LABEL-01]`)
+  check(!/phase:\s*node\.phase\b/.test(src),
+    'and every progress group comes from groupFor, never a bare node.phase  [R-LABEL-02]')
+
+  const ROLES = ['developer', 'tester', 'code-reviewer', 'product-owner', 'product-owner-critic',
+    'architect', 'architect-critic', 'ux-design', 'ux-auditor', 'arbiter', 'resolve-slices',
+    'release-worktrees', 'escalate', 'report']
+  const roundTrips = ROLES.every((r) => {
+    const a = E.parseLabel(E.labelFor(r, 2, 5))
+    const b = E.parseLabel(E.labelFor(r))
+    return a.role === r && a.round === 2 && a.rounds === 5 && b.role === r && b.round === null
+  })
+  check(roundTrips, `parseLabel(labelFor(...)) round-trips for all ${ROLES.length} roles  [R-LABEL-01]`)
+  check(E.parseLabel('build:01-a (1/5)').role === null,
+    'and the old colon form no longer parses, so a missed call site cannot pass silently  [R-LABEL-01]')
+
+  check(!ROLES.some((r) => /:|\s/.test(r)), 'no role name is an activity or carries a unit  [R-LABEL-02]')
+  check(E.parseLabel(E.labelFor('tester', 1, 5)).role === 'tester' && !/01-a/.test(E.labelFor('tester', 1, 5)),
+    'a row names the role only — the slice is not repeated on it  [R-LABEL-02]')
+
+  check(E.groupFor(E.NODES.build, '01-a') === 'Build \u00b7 01-a', 'a slice gets its own group  [R-LABEL-03]')
+  check(E.groupFor(E.NODES.build) === 'Build', 'and a helper call with no unit stays in the bare phase  [R-LABEL-03]')
+  const arch = E.groupFor(E.NODES.architect, 'architect')
+  const ux = E.groupFor(E.NODES.ux, 'ux')
+  check(E.NODES.architect.phase === E.NODES.ux.phase && arch !== ux,
+    'architect and ux share a phase and still get separate groups  [R-LABEL-03]')
+  check(String(arch).split(' \u00b7 ')[1] === 'architect',
+    'and the unit is recoverable from the group, which is how a stub tells two slices apart  [R-LABEL-02]')
+})
+
+await probe('R-BUILD-04b the queue is the one issues/ declares', async () => {
+  const E = engine({})
+  check(E.MAKER_PO.required.includes('slices'),
+    "the po MUST return its slice manifest — an absent one fell through to an unchecked re-derivation  [R-BUILD-04b]")
+  const item = E.MAKER_PO.properties.slices.items
+  check(item.required.includes('blockedBy'),
+    'and every entry MUST carry blockedBy — an absent edge list levels the whole queue at 0  [R-BUILD-04b]')
+  check(/Array\.isArray\(x\.blockedBy\)/.test(src),
+    'the engine re-checks it too, so a malformed manifest is not silently taken  [R-BUILD-04b]')
+
+  const slice = { id: '02-b', path: '.sdlc2/features/demo/issues/02-b.md', title: 'B', dir: '', blockedBy: ['01-a'] }
+  const t = E.testerPrompt(slice, { commands: { test: 'npm test' } }, 'slice/demo/01-a', ['slice/demo/01-a'], [], '')
+  check(/## Blocked by/.test(t) && new RegExp(slice.path).test(t),
+    'the tester is told to open its own issue file and read its Blocked by section  [R-BUILD-04b]')
+  check(/slice-graph-mismatch/.test(t),
+    'and a difference is a named critical defect  [R-BUILD-04b]')
+  check(t.indexOf('slice-graph-mismatch') < t.indexOf('slice-branch-base'),
+    'and it is asserted BEFORE the branch topology, which is derived from the same list  [R-BUILD-04b]')
+  check(/01-a/.test(t.slice(0, t.indexOf('slice-graph-mismatch'))),
+    'the tester is shown the blockers the engine believes, so it has something to compare against  [R-BUILD-04b]')
+
+  const none = E.testerPrompt({ id: '01-a', path: 'i/01-a.md', title: 'A', dir: '', blockedBy: [] },
+    { commands: { test: 'npm test' } }, 'main', [], [], '')
+  check(/NOTHING/.test(none),
+    'a slice the engine believes is unblocked says so explicitly — silence would read as "not checked"  [R-BUILD-04b]')
+})
+
 await probe('SD-07 queue single source of truth', async () => {
   const m = M.NODES.architect.mandate
   check(/issues\//.test(m) && /single source of truth/i.test(m), 'the architect mandate names issues/ as the queue\'s single source of truth  [R-ARCH-03]')
@@ -1450,32 +1618,32 @@ await probe('E-04 arbiter cannot commit · E-07 lanes', async () => {
     args: { feature: 'demo', title: 'Demo', runId: 'r', defaultBranch: 'main', config: { commands: { test: 'npm test', install: 'npm ci' }, seam: {} }, configByDir: {} },
     agent: async (p, o) => {
       const L = o.label || ''
-      said.push({ label: L, prompt: p })
-      if (L.startsWith('slices:resolve')) return { slices: [
+      said.push({ role: role(o), unit: unit(o), prompt: p })
+      if (role(o) === 'resolve-slices') return { slices: [
         { id: '01-a', path: 'issues/01-a.md', title: 'A', dir: '', blockedBy: [], ui: false },
         { id: '02-b', path: 'issues/02-b.md', title: 'B', dir: '', blockedBy: [], ui: false },
       ] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'verified-sha', branch: `slice/demo/${L.slice(6).split(' ')[0]}`, changelog: 'x' }
-      if (L.startsWith('test:')) return { pass: true, defects: [] }
-      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
-      if (L.startsWith('arbiter:')) return { finalized: true, records: [{ id: 'VH-build-01-a-01', decision: 'd', rationale: 'r' }] }
+      if (role(o) === 'developer') return { committed: true, sha: 'verified-sha', branch: `slice/demo/${unit(o)}`, changelog: 'x' }
+      if (role(o) === 'tester') return { pass: true, defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
+      if (role(o) === 'arbiter') return { finalized: true, records: [{ id: 'VH-build-01-a-01', decision: 'd', rationale: 'r' }] }
       return {}
     },
   })
   const r = await E.buildSlices(E.NODES.build)
-  const arb = (said.find((x) => x.label.startsWith('arbiter:')) || {}).prompt || ''
+  const arb = (said.find((x) => x.role === 'arbiter') || {}).prompt || ''
   check(/Do NOT edit code and do NOT commit/.test(arb), 'the build arbiter is forbidden from committing  [E-04]')
   check(!/commit any fix/.test(arb), 'and is not invited to "commit any fix" any more  [E-04]')
   check(/finalized/.test(arb) && /escalated to a\n?\s*human/.test(arb), 'it may refuse the debt instead  [E-04]')
   check(r.slices.shipped.every((x) => x.sha === 'verified-sha'), 'a shipped slice carries the sha the tester verified  [E-04]')
 
-  const dev = (said.find((x) => x.label.startsWith('build:01-a')) || {}).prompt || ''
+  const dev = (said.find((x) => x.role === 'developer' && x.unit === '01-a') || {}).prompt || ''
   check(/git worktree add/.test(dev), 'with lanes open, a slice builds in its own worktree  [E-07]')
   check(/npm ci/.test(dev), 'and installs dependencies there before testing  [E-07]')
-  const tst = (said.find((x) => x.label.startsWith('test:01-a')) || {}).prompt || ''
+  const tst = (said.find((x) => x.role === 'tester' && x.unit === '01-a') || {}).prompt || ''
   check(/git -C \.\.\/\.sdlc2-worktrees\/demo-r\/01-a/.test(tst), 'and the tester judges THAT tree, not the session checkout  [R-BUILD-07]')
   check(/\.\.\//.test(tst), 'and that tree is OUTSIDE the repo, so the project test runner cannot collect it  [SD-04]')
-  check(said.some((x) => x.label === 'worktrees:release'), 'the worktrees are released when building ends  [E-07]')
+  check(said.some((x) => x.role === 'release-worktrees'), 'the worktrees are released when building ends  [E-07]')
 })
 
 // P20 — [E-04 mirror] an arbiter that REFUSES the debt escalates instead of shipping.
@@ -1484,11 +1652,11 @@ await probe('E-04 arbiter refusal', async () => {
     parallel: parallelReal,
     agent: async (p, o) => {
       const L = o.label || ''
-      if (L.startsWith('slices:resolve')) return { slices: [{ id: '01-a', path: 'p', title: 'A', dir: '', blockedBy: [], ui: false }] }
-      if (L.startsWith('build:')) return { committed: true, sha: 'cafe', branch: 'slice/demo/01-a', changelog: 'x' }
-      if (L.startsWith('test:')) return { pass: true, defects: [] }
-      if (L.startsWith('review:')) return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
-      if (L.startsWith('arbiter:')) return { finalized: false, records: [] }
+      if (role(o) === 'resolve-slices') return { slices: [{ id: '01-a', path: 'p', title: 'A', dir: '', blockedBy: [], ui: false }] }
+      if (role(o) === 'developer') return { committed: true, sha: 'cafe', branch: 'slice/demo/01-a', changelog: 'x' }
+      if (role(o) === 'tester') return { pass: true, defects: [] }
+      if (role(o) === 'code-reviewer') return { criteria: E.RUBRICS.build.criteria.map((c) => ({ id: c.id, score: 0.2 })), defects: [] }
+      if (role(o) === 'arbiter') return { finalized: false, records: [] }
       return {}
     },
   })

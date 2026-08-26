@@ -37,6 +37,29 @@ const CONFIG_BY_DIR = A.configByDir || {}
 const AGENT_PREFIX = A.agentPrefix || ''
 function at(name) { return AGENT_PREFIX + name }
 
+// ───────────────────────────────────────────────── labels and groups ────
+// [R-LABEL-01] Every spawn label is built HERE, and nowhere else. Labels are not decoration: the
+// conformance harness routes its stubbed agents by reading them, so a label typed by hand at a
+// call site is an undeclared interface that breaks `verify.mjs` silently — and in the tests that
+// assert a FAILURE path, it breaks them into passing for the wrong reason.
+//
+// A row names a ROLE and nothing else. The unit of work — which slice, which node — is carried by
+// the progress GROUP instead, so it is stated once in a heading rather than repeated on every row.
+const roleOf = (agent) => String(agent || '').replace(/^sdlc2-/, '')
+function labelFor(role, round, rounds) {
+  return round ? `${role} (${round}/${rounds})` : String(role)
+}
+function parseLabel(label) {
+  const m = /^([a-z0-9][a-z0-9-]*)(?: \((\d+)\/(\d+)\))?$/.exec(String(label || ''))
+  return m
+    ? { role: m[1], round: m[2] ? Number(m[2]) : null, rounds: m[3] ? Number(m[3]) : null }
+    : { role: null, round: null, rounds: null }
+}
+// `Build · 01-add-a-due-date` groups one slice's three personas together; `Design · architect`
+// does the same for a document node, which matters because architect and ux share a phase and
+// would otherwise interleave, out of order, in one box.
+const groupFor = (node, unit) => (unit ? `${node.phase} · ${unit}` : node.phase)
+
 const VH = `${DIR}/VERIFY-WITH-HUMAN.md`
 const SEED = `${DIR}/feature.md`
 const MOCKUP = `${DIR}/mockup.html`
@@ -137,8 +160,12 @@ const VERDICT_BINARY = {
 // One queued slice. Shared by the po maker's manifest and the fallback resolver, so the two can
 // never drift into describing the same thing differently. [E-13]
 const SLICE_ITEM = {
+  // [R-BUILD-04b] `blockedBy` is REQUIRED. It used to be optional, which made a manifest carrying
+  // no edges at all perfectly legal — and then every slice lands at level 0, every branch is cut
+  // from the default branch, and the stacking invariant evaporates without a word. An empty array
+  // is a real answer ("nothing blocks this"); an absent field is a graph nobody stated.
   type: 'object',
-  required: ['id', 'path', 'title'],
+  required: ['id', 'path', 'title', 'blockedBy'],
   properties: {
     id: { type: 'string' }, // NN-slug
     path: { type: 'string' }, // issues/NN-slug.md
@@ -182,7 +209,10 @@ const MAKER = { type: 'object', required: ['ok', 'artifacts'], properties: MAKER
 
 // The po maker MUST state hasUiStories: the executor gates the ux node on it, and an omitted
 // flag would silently skip UX on a feature full of screens.
-const MAKER_PO = { type: 'object', required: ['ok', 'artifacts', 'hasUiStories'], properties: MAKER_PROPS }
+// [R-BUILD-04b] `slices` is REQUIRED. Omitting it was legal, and the engine then fell back to an
+// agent re-deriving the queue from the issue files with no checker over it — so the fallback was
+// the normal path. The po WROTE those files; its manifest is the first-hand source.
+const MAKER_PO = { type: 'object', required: ['ok', 'artifacts', 'hasUiStories', 'slices'], properties: MAKER_PROPS }
 
 function makerSchema(node) { return node.id === 'po' ? MAKER_PO : MAKER }
 function verdictSchema(checker) { return checker.binary ? VERDICT_BINARY : VERDICT }
@@ -969,8 +999,8 @@ async function runLoop(node) {
       model: node.maker.model,
       effort: node.maker.effort,
       schema: makerSchema(node),
-      label: `${label}:make (${round}/${node.rounds})`,
-      phase: node.phase,
+      label: labelFor(roleOf(node.maker.agent), round, node.rounds),
+      phase: groupFor(node, node.id),
     })
 
     // [SD-05] A maker that never ANSWERED is a transport failure, not a content one. `spawn` has
@@ -1017,8 +1047,8 @@ async function runLoop(node) {
           model: c.model,
           effort: c.effort,
           schema: verdictSchema(c),
-          label: `${label}:${c.agent.replace('sdlc2-', '')} (${round}/${node.rounds})`,
-          phase: node.phase,
+          label: labelFor(roleOf(c.agent), round, node.rounds),
+          phase: groupFor(node, node.id),
         })
       )
     )
@@ -1128,8 +1158,8 @@ async function arbitrate(node, result) {
     model: node.arbiter.model,
     effort: node.arbiter.effort,
     schema: ARBITER,
-    label: `${node.id}:arbiter`,
-    phase: node.phase,
+    label: labelFor('arbiter'),
+    phase: groupFor(node, node.id),
   })
   if (!decision) {
     log(`${node.id}: the arbiter itself returned nothing — recorded as a hard fail rather than a silent pass.`)
@@ -1257,6 +1287,15 @@ function testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt) {
     `1. HEAD is ALREADY on 'slice/${FEATURE}/${slice.id}'. Assert it with\n` +
     `   \`${g} branch --show-current\` and STOP if it is anything else — do not switch, stash, or\n` +
     `   otherwise move the working tree: a code reviewer is reading the same tree right now.\n` +
+    `1a. ASSERT THE GRAPH ITSELF, BEFORE THE BRANCH. The engine was told this slice is blocked by:\n` +
+    `   ${(slice.blockedBy || []).length ? (slice.blockedBy || []).join(', ') : 'NOTHING'}\n` +
+    `   Open ${slice.path} and read its \`## Blocked by\` section. If the file names a different\n` +
+    `   set — one blocker more, one fewer, or a different one — that is a CRITICAL defect named\n` +
+    `   \`slice-graph-mismatch\`. Quote both lists verbatim.\n` +
+    `   This check exists because everything below it is derived from the list above, so without\n` +
+    `   reading the file you would only be confirming that the branch matches a graph that may\n` +
+    `   itself be wrong. The issue files are the single source of truth for the queue. Report the\n` +
+    `   mismatch and keep going; never edit the issue file, and never re-cut the branch.\n` +
     `1b. ASSERT THE BRANCH TOPOLOGY before you judge any behaviour. This slice was to be cut from\n` +
     `   '${base}'. These commands are read-only; run them and quote their real exit status:\n` +
     `     - \`${g} merge-base --is-ancestor ${base} HEAD\` MUST exit 0.\n` +
@@ -1388,7 +1427,10 @@ async function buildSlices(node) {
   // The resolver spawn stays as the fallback for a po that omitted the manifest.
   const manifest =
     results.po && results.po.maker && Array.isArray(results.po.maker.slices)
-      ? results.po.maker.slices.filter((x) => x && x.id && x.path && x.title)
+      // [R-BUILD-04b] `blockedBy` is checked here too, not just in the schema: an entry without it
+      // is a slice whose place in the graph nobody stated, and taking it would silently level the
+      // whole queue at 0.
+      ? results.po.maker.slices.filter((x) => x && x.id && x.path && x.title && Array.isArray(x.blockedBy))
       : []
   const plan = manifest.length ? { slices: manifest } : await spawn(
     `Enumerate the queued slices for feature "${FEATURE}".\n\n` +
@@ -1407,7 +1449,7 @@ async function buildSlices(node) {
       `Do not invent slices and do not modify any file.`,
     // [E-09] `medium`: this single unchecked call determines the entire branch topology, a larger
     // blast radius than any checker in the graph, and it was the cheapest tier in the engine.
-    { schema: SLICES, model: 'sonnet', effort: 'medium', label: 'slices:resolve', phase: node.phase }
+    { schema: SLICES, model: 'sonnet', effort: 'medium', label: labelFor('resolve-slices'), phase: groupFor(node) }
   )
   if (manifest.length) log(`${manifest.length} slice(s) taken from the product owner's own manifest — no resolver round-trip.`)
   // [SD-11] Applied to BOTH paths. The resolver is *told* the id is the NN-slug from the filename,
@@ -1551,8 +1593,8 @@ async function buildSlices(node) {
         model: node.maker.model,
         effort: node.maker.effort,
         schema: BUILD,
-        label: `build:${slice.id} (${attempt}/${rounds})`,
-        phase: node.phase,
+        label: labelFor(roleOf(node.maker.agent), attempt, rounds),
+        phase: groupFor(node, slice.id),
       })
       // [E2-05] Two different events used to share this branch: a developer that never ANSWERED
       // (transport — `spawn` already retried it free and failed) and a developer that answered and
@@ -1586,11 +1628,11 @@ async function buildSlices(node) {
       const verdicts = await parallel([
         () => spawn(testerPrompt(slice, cfg, base, mustContain, mustNotContain, wt), {
           agentType: at(testerRole.agent), model: testerRole.model, effort: testerRole.effort,
-          schema: verdictSchema(testerRole), label: `test:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
+          schema: verdictSchema(testerRole), label: labelFor(roleOf(testerRole.agent), attempt, rounds), phase: groupFor(node, slice.id),
         }),
         () => spawn(reviewerPrompt(slice, cfg, base, wt, mustContain, prevScores), {
           agentType: at(reviewRole.agent), model: reviewRole.model, effort: reviewRole.effort,
-          schema: verdictSchema(reviewRole), label: `review:${slice.id} (${attempt}/${rounds})`, phase: node.phase,
+          schema: verdictSchema(reviewRole), label: labelFor(roleOf(reviewRole.agent), attempt, rounds), phase: groupFor(node, slice.id),
         }),
       ])
       const tv = verdicts[0]
@@ -1665,7 +1707,7 @@ async function buildSlices(node) {
     // Tests green, craft findings survived → arbiter may accept the debt and keep the commit.
     const decision = await spawn(buildArbiterPrompt(slice, defects, rounds), {
       agentType: at(node.arbiter.agent), model: node.arbiter.model, effort: node.arbiter.effort,
-      schema: ARBITER, label: `arbiter:${slice.id}`, phase: node.phase,
+      schema: ARBITER, label: labelFor('arbiter'), phase: groupFor(node, slice.id),
     })
     if (!decision) {
       escalated.push({ id: slice.id, defects: defects, reason: 'arbiter-silent' })
@@ -1697,17 +1739,26 @@ async function buildSlices(node) {
   // relationship to. They are scheduled by DEPENDENCY LEVEL instead — everything with no
   // unshipped blocker forms level 0 and can run together, level 1 starts as its blockers land.
   //
-  // Concurrency is opt-in and conditional, because a fresh worktree is a fresh tree: it has no
-  // installed dependencies, so the test command cannot run in it until they are installed. If the
-  // project has not declared `commands.install`, lanes would produce slices that fail for a reason
-  // that has nothing to do with the code, so the engine stays sequential and SAYS SO.
+  // Concurrency is opt-in, because a fresh worktree is a fresh tree: if the test command cannot
+  // run in it, a slice fails for a reason that has nothing to do with its code.
+  //
+  // [R-BUILD-04c] The gate used to ask "is `commands.install` declared?", which is a proxy for the
+  // real question and wrong for a whole ecosystem. Maven and Gradle resolve from a shared `~/.m2`
+  // or Gradle cache, so a JVM project genuinely needs no install step — and was serialised for
+  // having nothing to install, silently losing `E2-14` and the worktree isolation of `SD-04` on
+  // every run. The question is whether a fresh worktree is testable. Only the project knows, so
+  // the project answers: an install command implies yes, and a deliberately declared `lanes: N > 1`
+  // says yes outright. The engine cannot find out for itself — it spawns agents, it does not run
+  // commands — so a probe would mean a full test-suite run in the pre-checks on every run forever.
+  // The pre-checks ask the human to try one worktree by hand instead, once per project.
   const install = String((CONFIG.commands || {}).install || '').trim()
   // [E2-10] The cap was the bare literal 4, derived from nothing. It is now the project's to set —
   // `lanes:` in the sdlc2 config block — with 4 as the default. Zero or nonsense falls back rather
   // than disabling the build.
   const declaredLanes = Math.floor(Number(CONFIG.lanes))
   const MAX_LANES = declaredLanes > 0 ? declaredLanes : 4
-  const LANES = install ? MAX_LANES : 1
+  const byConsent = !install && declaredLanes > 1
+  const LANES = install ? MAX_LANES : byConsent ? declaredLanes : 1
 
   // Bucket the slices by the levels computed above. A slice whose blocker is unknown lands at
   // level 0, which is safe: the `blockedBy` guard inside runSlice still refuses to build it and
@@ -1723,9 +1774,14 @@ async function buildSlices(node) {
   // [SD-08 / R-REP-05] What follows was only ever `log()`ed, which reaches the watching human and
   // nothing else: the report — the artifact that outlives the run — never learned whether slices
   // built concurrently or in a line. Record it as data so the report node can state it either way.
-  const lanes = { lanes: LANES, install: install || null, widest: widest, concurrent: false, batches: [] }
-  if (LANES === 1 && widest > 1) {
-    log(`${widest} slice(s) are independent and could build concurrently, but the project declares no \`commands.install\`; a fresh worktree would have no dependencies to test against. Building sequentially.`)
+  const lanes = { lanes: LANES, install: install || null, opened: install ? 'install' : byConsent ? 'declared-lanes' : null, widest: widest, concurrent: false, batches: [] }
+  // [R-BUILD-04c] Every path says which one it took. The consent path in particular is a claim the
+  // PROJECT made and the engine cannot check — so a run that acted on it has to be readable as
+  // having acted on it, or a slice failing on missing dependencies looks like a slice with a bug.
+  if (byConsent) {
+    log(`Building up to ${LANES} slices at once because the project declares \`lanes: ${declaredLanes}\` and no \`commands.install\`. That is the project asserting a fresh worktree is testable as checked out — nothing here verifies it. If slices start failing on missing dependencies, that assertion is what to doubt first. [R-BUILD-04c]`)
+  } else if (LANES === 1 && widest > 1) {
+    log(`${widest} slice(s) are independent and could build concurrently, but the project declares neither \`commands.install\` nor \`lanes: N > 1\`; a fresh worktree may have no dependencies to test against. Building sequentially. Declare either one to open lanes. [R-BUILD-04c]`)
   }
 
   // [E2-14] Slices are scheduled against THEIR OWN blockers, not against a level. The level loop
@@ -1814,7 +1870,7 @@ async function buildSlices(node) {
         `true only if every slice branch is still present, and [SD-12] \`container\` true only if you\n` +
         `actually removed \`${WORKTREES}\` — false if it is still there for ANY reason, including a\n` +
         `non-empty directory you correctly declined to delete. Do not report a step you did not take.`,
-      { model: 'sonnet', effort: 'low', schema: RELEASE, label: 'worktrees:release', phase: node.phase }
+      { model: 'sonnet', effort: 'low', schema: RELEASE, label: labelFor('release-worktrees'), phase: groupFor(node) }
     )
     // [E2-08] Read the answer. A release that failed, half-finished, or never replied is a
     // human-verify item, not a silent success — a stranded worktree holds a branch checked out and
@@ -1841,7 +1897,7 @@ async function buildSlices(node) {
     log(`Writing ${escalations.length} escalation note(s).`)
     await parallel(escalations.map((e) => () =>
       spawn(escalationPrompt(e.slice, e.reason, e.attempt, e.defects), {
-        model: 'sonnet', effort: 'low', label: `escalate:${e.slice.id}`, phase: node.phase,
+        model: 'sonnet', effort: 'low', label: labelFor('escalate'), phase: groupFor(node, e.slice.id),
       })
     ))
   }
@@ -1852,7 +1908,7 @@ async function buildSlices(node) {
     verdict: verdict,
     score: null,
     rounds: 0,
-    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows, lanes: lanes, amendments: amendments },
+    slices: { shipped: shipped, escalated: escalated, skipped: skipped, rows: rows, lanes: lanes, amendments: amendments, merge: mergePlan(shipped.map((x) => x.id), slices, levelOf) },
   }
 }
 
@@ -1873,6 +1929,43 @@ function upstreamDisputes() {
 
 // [E2-11] The slice table, printed once the slices are known and before the first one is built.
 // Plain headings on purpose: "Waits for" is readable, `blockedBy` needs you to know the system.
+// [R-REP-09] What a human actually has to merge, which is NOT one branch per slice.
+//
+// A stacked slice's branch contains its blockers': `baseFor` cuts it from the last of them and the
+// tester proves every other blocker is an ancestor, so merging a LEAF merges its whole chain. Six
+// slices in a chain two wide are two merges, not six — and until now the report never said so,
+// leaving the reader to work out the ordering from the `Waits for` column by hand, or to merge six
+// branches one at a time and hit "already up to date" four times.
+//
+// Leaves are computed over the SHIPPED subgraph only: a slice whose blocker escalated was skipped,
+// so every shipped slice's blockers shipped too.
+function mergePlan(shippedIds, slices, levelOf) {
+  const by = Object.create(null)
+  for (const sl of slices) by[sl.id] = sl
+  const has = new Set(shippedIds)
+  const blockersOf = (id) => ((by[id] && by[id].blockedBy) || []).filter((b) => has.has(b))
+
+  const covered = new Set()
+  for (const id of shippedIds) for (const b of blockersOf(id)) covered.add(b)
+
+  // Transitive, so the report can say what each merge actually brings with it.
+  const reach = (id, seen) => {
+    for (const b of blockersOf(id)) {
+      if (seen.has(b)) continue
+      seen.add(b)
+      reach(b, seen)
+    }
+    return seen
+  }
+  const order = (a, b) => (levelOf[a] || 0) - (levelOf[b] || 0) || (a < b ? -1 : a > b ? 1 : 0)
+  const leaves = shippedIds.filter((id) => !covered.has(id)).sort(order)
+  return {
+    leaves: leaves,
+    carries: leaves.map((id) => ({ id: id, brings: [...reach(id, new Set())].sort(order) })),
+    shipped: shippedIds.slice().sort(order),
+  }
+}
+
 function sliceTableLines(slices, levelOf) {
   const rows = slices.map((sl) => ({
     slice: sl.id,
@@ -1999,6 +2092,7 @@ async function writeReport(node) {
       `Node results: ${JSON.stringify(nodeRows)}\n` +
       `Slices: ${JSON.stringify(build.rows)}\n` +
       `Lanes: ${JSON.stringify(build.lanes)}\n` +
+      `Merge plan: ${JSON.stringify(build.merge || null)}\n` +
       `Amendments: ${JSON.stringify(build.amendments || [])}\n` +
       `Soft-passed: ${JSON.stringify(softPassed)}\n` +
       `Vetoes: ${JSON.stringify(vetoes)}\n` +
@@ -2054,6 +2148,14 @@ async function writeReport(node) {
       `test against — name it as the one-line config change that would unlock lanes. A \`widest\` of\n` +
       `1 means nothing was independent enough to run beside anything else, which is not a config\n` +
       `problem. A reader who was not watching the run has no other way to learn any of this;\n` +
+      `(2c) [R-REP-09] WHAT TO MERGE, from \`Merge plan\` — its own short section, never omitted\n` +
+      `when anything shipped. Lead with the count: \`leaves\` is what a human actually has to merge,\n` +
+      `and it is usually FEWER than the slices that shipped. A stacked slice's branch already\n` +
+      `contains its blockers', so merging a leaf merges its whole chain — list each leaf's branch\n` +
+      `and, from \`carries\`, name what it brings with it. Say plainly that merging only the leaves\n` +
+      `is enough, and that the other branches are there for review rather than for merging. Where\n` +
+      `\`leaves\` has more than one entry they are independent tips and may be merged in any order.\n` +
+      `Do not print a merge order for slices that did not ship.\n` +
       `(3) a human-verify index: read ${VH} if it exists and list every OPEN row (id · node ·\n` +
       `severity · one-line decision);\n` +
       `(4) the maker disputes, if any — they are unresolved disagreements, not noise;\n` +
@@ -2097,7 +2199,7 @@ async function writeReport(node) {
       `\`git clean\` anything. Append a short \`## Paperwork not committed\` section to the report\n` +
       `saying exactly which command failed and its real output, and stop. A lost artifact is worse\n` +
       `than an uncommitted one.`,
-    { model: node.maker.model, effort: node.maker.effort, label: 'report', phase: node.phase }
+    { model: node.maker.model, effort: node.maker.effort, label: labelFor('report'), phase: groupFor(node) }
   )
   return { node: node.id, verdict: 'pass', score: null, rounds: 0, report: REPORT, paperwork: `sdlc2/${FEATURE}` }
 }

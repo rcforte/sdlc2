@@ -8,45 +8,174 @@
 
 ## Do this first
 
-**Run 5 is done, merged, and closed out.** Feature `undo-a-removal`, 3 slices, all merged to lab
-`main`, suite green (151 tests), report header `Engine: sdlc2 0.1.8` — **SD-03 holds for the third
-time**, and `git worktree list` ended clean, so **SD-04 holds again**. Three of its four
-human-verify records are resolved; VH-02, the screen-reader pass, is not.
+**0.1.9 is tagged, pushed and installed.** Verified this session: `VERSION` 0.1.9, tag `v0.1.9`
+pushed at `183497a`, `main` clean and in sync, install cache at
+the install cache for 0.1.9 byte-identical to the repo for
+`new-feature.workflow.js`, `verify.mjs` and the agent files, `verify.mjs` all-green. Steps 1-4 of
+the old list are genuinely done; this session is pinned to a real 0.1.9.
+
+**Run 6's target changed: `~/dev/code/instrument-service`, NOT `~/dev/code/db`.** Decided
+2026-08-25. The reason given was the better test, not blast radius: a real reactive Spring Boot
+service is a truer exercise of the stack-agnostic claim (`E2-02`) than a hand-rolled database.
+It removes the lab-maturity confound (`SD-10`) just as well as db would have.
+
+**What the switch gives up, deliberately.** The `db/CLAUDE.md` methodology-collision experiment is
+gone entirely — instrument-service had no `CLAUDE.md` at all. So is the set of human-written
+Planned briefs in `db/docs/features/` that the `po` node's framing was going to be read against;
+`instrument-service/IMPLEMENTATION.md` is a phased TODO roadmap and only partly substitutes.
+instrument-service **does** have a UI (`ui/`, React 19 + Vite + Playwright), so the
+`hasUiStories: false` skip path still never executes — it stays unrun after run 6 as well.
 
 **Next, in this order:**
 
+Run 6 now waits on 0.1.10 and a lab run — see `Rafa-todo-list-1.md` for the engine work and
+the release plan. This table is the target-repo half.
+
 | # | do | state |
 |---|---|---|
-| 1 | build 0.1.9 | **DONE** — `R-REP-08`, `R-BUILD-07`, SD-12's field, at `b037638`. 402 checks, was 372 |
-| 2 | move the findings log, file SD-10…SD-13, close SD-05 | **DONE** — the log now lives in this repo at `harness-findings.md` |
-| 3 | tag `v0.1.9`, push, `claude plugin update sdlc2@sdlc2-marketplace` | **TODO** |
-| 4 | restart | **TODO** — a session pins its plugin root at start (SD-03) |
-| 5 | one screen-reader pass on the merged lab app, closing all six open a11y records | **TODO** — see SD-13 |
-| 6 | write down the run 6 prediction before running it | **TODO** |
-| 7 | grill the seed in a **db-rooted** session, then run 6 | **TODO** |
+| 1 | fix the two false-green hazards in instrument-service (see below) | **DECIDED 2026-08-25 — fix both, before 0.1.10 ships** |
+| 2 | `git init` instrument-service, drop the `application-*.yml` ignore line, baseline commit | **TODO** — blocking; the engine cannot run without a repo |
+| 3 | dry lane: one manual worktree outside the repo, run `mvn -B verify` in it | **TODO** — agreed; converts run-destroying surprises into five minutes |
+| 4 | four screen-reader passes on the merged lab app | **TODO** — framing settled, see below |
+| 5 | 0.1.10, then one small `sdlc2-lab` run to prove it | **TODO** — stubs cannot show a tester really reading an issue file |
+| 6 | write the run 6 prediction **in your own words**, then mine separately | **TODO** |
+| 7 | grill the seed in an instrument-service-rooted session, then run 6 | **TODO** — no seed chosen yet |
 
-**Run 6 targets `~/dev/code/db`, not the lab.** Java 21 + Gradle, three modules. The reason is
-SD-10: the lab's maturity and the engine's improvement explain the one-round-pass trend equally
-well, and no sixth run on the same codebase can separate them. It also tests the stack-agnostic
-claim (`E2-02`) for the first time — five runs, one stack.
+**Why item 1 can no longer wait.** The lane gate fix in 0.1.10 is what finally gives
+instrument-service two lanes — today it declares no `commands.install` shape the gate accepts, so
+it would have built serially and the fixed Playwright port would have stayed dormant. Fixing the
+gate is what turns that hazard from theoretical into active. The two changes must land together or
+run 6's UI slices will pass against each other's builds.
 
-**Seed for run 6: "the three statements the MVP is missing — column projection, DELETE, and
-UPDATE."** All three build on WHERE filtering, which shipped in spec 0003, and **none blocks
-another** — which is what run 5 could not produce and what `E2-14` needs. Weights differ visibly:
-DELETE is lightest, projection touches the planner, UPDATE has to choose between in-place rewrite
-and delete-and-reinsert. db has no UI at all, so it is also the first real exercise of the ux gate.
-`docs/features/` already holds a human-written Planned brief for each, so the po node's framing can
-be read against one.
+### instrument-service: what was found before the run
 
-**`db/CLAUDE.md` is being left exactly as it is, deliberately.** It mandates a competing
-methodology — grill with `/grill-with-docs`, nine-section specs at `specs/NNNN`, `/outside-in-tdd`,
-`/improve-codebase-architecture` before commit, `/caveman` responses — and names four skills sdlc2
-is forbidden by `R-IND-01..04` to invoke. Its definition of done cannot be satisfied by sdlc2 at
-all. Every subagent will load it. **No outcome of that collision is wasted:** if the personas cope,
-the stack claim holds and sdlc2 survives an opinionated host; if the run derails, that is the most
-valuable finding available and one no probe could produce. Write the prediction first (step 6) —
-my own is that the definition of done is the sharpest collision, and whichever instruction source
-the developer obeys tells you which one wins.
+Blocking, in order of how quietly they fail:
+
+- **It is not a git repository.** No `.git`, no history. The build node hands agents
+  `git worktree add`, `git checkout -b`, `git merge-base --is-ancestor`
+  (`new-feature.workflow.js:1207,1222`). Run 6 would die at slice 1, after po/architect/ux had
+  already spent their rounds.
+- **A naive `git init && git add -A` breaks every lane.** `.gitignore` line 22 is
+  `application-*.yml`, which matches `src/test/resources/application-test.yml` (and the dev/prod
+  profiles). A worktree checks out **tracked files only**, so that file is absent in every lane:
+  the session checkout is green and all N slices fail on config. Nothing in pre-check 0 looks for
+  it. **None of the three files contains a secret** — all use `${ENV:default}` indirection and the
+  only literal is a local dev password — so the ignore line is generic Spring boilerplate
+  protecting nothing. Delete it before the baseline commit.
+- **Fixed Playwright port + `lanes: 2` = a silent false green.** `ui/playwright.config.ts` pins the
+  webServer to `127.0.0.1:4173` with `reuseExistingServer: true`. Two UI slices building
+  concurrently in separate worktrees both start it; the second **reuses the first lane's server**,
+  serving the first lane's build, and its acceptance test passes against the wrong code. SD-04's
+  shape on a port instead of a filesystem — and unlike SD-04 it fails toward green. Proposed fix:
+  `reuseExistingServer: false`, so a clash fails loudly.
+- **`mvn verify` goes green without touching the database.** The integration tests carry
+  `@Testcontainers(disabledWithoutDocker = true)`. No Docker in a lane, tests silently disable,
+  suite passes. That makes the whole point of choosing `verify` over `test` conditional on an
+  environment fact nobody checks. Proposed fix: drop the flag so it goes red.
+
+**Why fixing both was recommended rather than letting run 6 find them:** neither is the graph's to
+catch. The tester runs the declared command and reads its output; a pass that quietly skipped three
+tests is indistinguishable from a real pass. No rubric asks, no defect would ever be filed. Leaving
+them in does not test the graph — it poisons every verdict run 6 produces on exactly the axis the
+target was switched to examine. **The session stopped before this was decided.**
+
+### An engine finding, filed from reading the code, not from a run
+
+**The lane gate assumes npm-style dependencies**, so instrument-service would build serially for
+having nothing to install. **Described and owned in `Rafa-todo-list-1.md`, the "Lane gate" item** — do not
+restate it here; two files describing one fix is how they drift apart.
+
+Worked around for run 6 by declaring `mvn -B -DskipTests dependency:go-offline`, which is what
+SETUP.md itself suggests. The lane gate ships in 0.1.10, ahead of run 6, so that declaration stops being
+load-bearing once it lands.
+
+### Config written this session (uncommitted, and instrument-service is not yet a repo)
+
+Two new files, both containing an `<!-- sdlc2:config -->` block:
+
+- **`instrument-service/CLAUDE.md`** — `stack` declared; `lanes: 2`; `test: "mvn -B verify"`;
+  `install: "mvn -B -DskipTests dependency:go-offline"`; `build`, `run`, `e2e`; `seam.backend` is
+  the real one (`@SpringBootTest(RANDOM_PORT)` + `@AutoConfigureWebTestClient` -> `WebTestClient`,
+  Testcontainers Postgres via `PostgresIntegrationTestSupport`, `mockJwt()` for auth).
+- **`instrument-service/ui/CLAUDE.md`** — the per-directory override. This is the path the comment
+  at `new-feature.workflow.js:734` describes as the reason per-directory config exists, and it has
+  **never been exercised**. Nested `CLAUDE.md` wins by longest matching path prefix (`configFor()`).
+
+`mvn verify` was chosen over `mvn test` deliberately: `test` skips
+`InstrumentApiIntegrationTest`, `InstrumentRepositoryIntegrationTest` and
+`PostgresIntegrationTestSupport`, so on a reactive R2DBC service the tester's green would exclude
+the persistence layer — building the soft checker of SD-10 into the config by hand.
+
+**Environment verified:** Maven 3.9.9 (installation on `/mnt/c`, running the Linux JDK 21, `~/.m2`
+on the Linux filesystem at 1.1G and shared across worktrees), Docker running, Java 21. No `mvnw`
+wrapper in the project — commands use bare `mvn`.
+
+### The screen-reader pass: framing settled, not yet run
+
+Agreed this session, and it changes what the pass is for:
+
+- **It is evidence, not remediation.** If it finds something, that is a separate job that belongs
+  after run 6.
+- **The target is the unoracled-claim chain, not the `ux` node's score.** The ux-auditor is static
+  — it reads the mockup and the stories and never drives a browser — so `UX-A11Y` (weight 0.20)
+  has always scored *structural* accessibility and never claimed "a screen reader announces this".
+  A silent NVDA would indict the **architect** (ADR-0046, the `aria-relevant` argument), not the
+  auditor. The real finding shape is: **the architect asserts a mechanism, the ux node scores a
+  mockup embodying it, the tester verifies in jsdom which structurally cannot observe it, and the
+  report prints green across all three.** Nobody lied; there is no oracle anywhere in the chain for
+  the claim the feature is about, and the run does not say so. Under that framing **both outcomes
+  pay**: clean means the architect's mechanism reasoning is trustworthy unverified; dirty means
+  five runs shipped a headline requirement nothing checked.
+- **SD-13 is wrong about the shape of the backlog.** It says "the six are one question asked six
+  times". Reading the records: `saved-name` VH-02 names six lettered checks (a)-(f) plus VH-04 as a
+  sub-check of (f) plus a hint-read-as-description check; `saved-at` VH-02 is two things (does a
+  ticking row stay silent, is the row label heard); `remembered-names` VH-04 asks whether a swap is
+  re-announced; `undo-a-removal` VH-02 is (a) arrival, (b) silence on age-out, (c) press. That is
+  ~12 distinct observations across four features. **One pass would close six records on evidence
+  covering about a third of them** — SD-13's own failure recurring one level down, in the act of
+  resolving it. **Decision: four passes, one per feature, each record closed only against its own
+  checks.** Timebox by session, not by record count; close two and say so if appetite runs out.
+- **Every record frames the audible checks as binary — announced or swallowed — and misses a third
+  outcome: announced TWICE.** The removal moves focus into the region (so the reader reads the
+  region and its contents) *and* the offer is a node added to a polite live region (so it queues
+  its own announcement). On a long list that is worse than either outcome any record contemplates,
+  and none would catch it, because none asks *how much* is said.
+- **Predictions must be written into SD-13 before the pass.** The ones currently on the table are
+  *mine, adopted* — (a) announced, with real risk of duplication; (b) silent and correct, because
+  `aria-relevant` defaulting to `additions text` genuinely excludes removals; (c) announced
+  normally. **That is a methodology weakness, and it is the same one as SD-10 and E2-13:** a
+  prediction authored by an instance of the same model that runs the graph predicts the things the
+  graph is built to handle. It matters less here because NVDA is an external oracle, and much more
+  for run 6, which is judged by reading the graph's own report.
+- **Tooling:** `npm run dev` in `~/dev/code/sdlc2-lab`, open from Windows, NVDA in Chrome. WSL2
+  forwards localhost. NVDA is the right bet — the most idiosyncratic live-region-plus-focus
+  behaviour, so duplication shows there first.
+
+### The run 6 prediction — write yours first
+
+**You write it, in your own words, before I say what I expect. Then I write mine separately and
+both go into `harness-findings.md` before the run starts.** Two predictions from different sources
+is the only cheap way to make the disagreement visible; where they differ is where the run is worth
+watching, and where they agree and the run defies both is the finding. Prompts, now that the target
+has changed:
+
+1. **Does the two-stack, two-`CLAUDE.md` config hold?** Root Maven, `ui/` Vite — the per-directory
+   override path, first execution ever.
+2. **Testcontainers under two lanes.** Two Postgres containers, Docker in the loop. `SD-05` — a
+   transport failure scored as a content defect, never once fired in five runs, closed as
+   proven-by-probe — is genuinely live in this environment for the first time.
+3. **The per-criterion margins** (`[R-REP-08]`, new in 0.1.9) on unfamiliar ground.
+4. **Rounds used.** Five runs trended 15 -> 3. On a codebase with no ADR history and no settled
+   ubiquitous language, does it go back up? This is `SD-10`'s actual question.
+
+**No seed chosen yet.** It still needs what run 5 could not produce and `E2-14` needs: three or
+more slices that are **independent** — none blocking another — with **visibly uneven weights**, so
+the barrier's cost is observable. `IMPLEMENTATION.md`'s phased TODO list is the place to look.
+
+**`hasUiStories` is enforced now** — `[E2-06]` at `new-feature.workflow.js:695`, with the artifact
+skip at `:685` and the build-time refusal at `:1504`. Any note below calling it unenforced is
+stale. What has never executed is the `false` branch, and instrument-service has a UI, so it still
+will not.
 
 **0.1.9's theme is: the run can be read.** Four items, all observability — the veto tally
 (`R-REP-07`), the per-criterion margins (`R-REP-08`), slice ids that name their branch

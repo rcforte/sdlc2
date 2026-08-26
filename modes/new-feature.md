@@ -148,6 +148,19 @@ Do these in order and **stop** on the first failure, saying exactly what to fix.
    - **`commands.test` empty or absent** → stop. Without it the `tester` has no oracle and the
      whole build gate is theatre. The engine refuses on the same condition, so a run that
      somehow gets past you fails immediately rather than half-way through.
+   - **Lanes open when you say a fresh worktree is testable**, and you can say it two ways:
+     declare **`commands.install`**, or deliberately declare **`lanes: N > 1`**. The second exists
+     for Maven, Gradle, Go and anything else that resolves from a shared cache and needs no install
+     step — those projects used to build strictly sequentially for having nothing to install.
+     Nothing in the engine verifies the claim, so **try it once by hand before the first run**:
+
+     ```bash
+     git worktree add ../lane-probe HEAD && (cd ../lane-probe && <your test command>)
+     git worktree remove --force ../lane-probe
+     ```
+
+     Five minutes, once per project, and it converts a run-destroying surprise into a known fact.
+     If it fails, declare an install command that makes it pass, or leave lanes at 1.
    - **`commands.install`** is what opens parallel slice lanes. Independent slices build
      concurrently, each in its own git worktree, and a fresh worktree has **no installed
      dependencies** — so without this command the suite cannot run there and the engine stays
@@ -233,6 +246,23 @@ order:
    from the default branch, and `HEAD` is left there. Say so: the working tree is clean and the
    next run is not blocked. If the report carries a `## Paperwork not committed` section, that
    step failed — quote it, because the artifacts are then still untracked.
+
+6. **Where the run's transcripts are.** The `Workflow` tool's result names the directory it
+   wrote its agent transcripts to. **Record that path in your summary**, because nothing else
+   does: the run report has no timing at all, and the only clock-bearing record of the run is
+   those transcripts. Without the path, finding them again means searching every session
+   directory on the machine for a workflow that mentions this feature.
+
+   Then say that `bin/run-timing.mjs` reads them:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/run-timing.mjs" --feature <slug>
+   node "${CLAUDE_PLUGIN_ROOT}/bin/run-timing.mjs" --dir <the path above>   # exact, no searching
+   ```
+
+   It prints where the time went — per node, per slice, per call — plus wall-clock, summed agent
+   time, the ratio between them, and the largest stretch where nothing was running. Transcripts
+   are per-machine and can be pruned, so a run nobody timed may become untimeable.
 
 Point at the run report: `.sdlc2/features/<slug>/runs/<runId>.md`. It is written on **every**
 outcome, including a graph that aborted — if it is missing, the workflow itself failed to start
